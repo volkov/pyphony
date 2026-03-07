@@ -126,12 +126,13 @@ class Orchestrator:
 
         return global_available
 
-    async def _dispatch(self, issue: Issue) -> None:
+    async def _dispatch(self, issue: Issue, retry_attempt: int = 0) -> None:
         self._state.claimed.add(issue.id)
 
         attempt = RunAttempt(
             issue_id=issue.id,
             issue_identifier=issue.identifier,
+            attempt=retry_attempt,
             started_at=datetime.now(timezone.utc),
             status="running",
         )
@@ -158,7 +159,17 @@ class Orchestrator:
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
         try:
             result = await self._run_agent_fn(issue, entry.attempt.attempt)
-            self._on_worker_exit(issue.id, normal=True, error=None)
+            if hasattr(result, "status") and result.status == "failed":
+                log.error(
+                    "worker_failed",
+                    issue_identifier=issue.identifier,
+                    error=getattr(result, "error", None),
+                )
+                self._on_worker_exit(
+                    issue.id, normal=False, error=getattr(result, "error", "agent_failed")
+                )
+            else:
+                self._on_worker_exit(issue.id, normal=True, error=None)
         except Exception as exc:
             log.error(
                 "worker_failed",
@@ -195,11 +206,7 @@ class Orchestrator:
                 error=None,
             )
         else:
-            current_attempt = (
-                self._state.retry_attempts[issue_id].attempt + 1
-                if issue_id in self._state.retry_attempts
-                else 1
-            )
+            current_attempt = (entry.attempt.attempt or 0) + 1
             delay_ms = min(
                 10000 * (2 ** (current_attempt - 1)),
                 self._config.agent.max_retry_backoff_ms,
@@ -288,7 +295,7 @@ class Orchestrator:
             return
 
         self._state.claimed.discard(issue_id)
-        await self._dispatch(target)
+        await self._dispatch(target, retry_attempt=entry.attempt)
 
     def _is_dispatch_eligible_for_retry(self, issue: Issue) -> bool:
         active = {normalize_state(s) for s in self._config.tracker.active_states}
