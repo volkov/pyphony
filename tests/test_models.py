@@ -99,8 +99,8 @@ class TestServiceConfig:
         assert cfg.agent.max_turns == 20
         assert cfg.agent.max_retry_backoff_ms == 300000
         assert cfg.codex.command == "claude"
+        assert cfg.codex.permission_mode == "bypassPermissions"
         assert cfg.codex.turn_timeout_ms == 3600000
-        assert cfg.codex.read_timeout_ms == 5000
         assert cfg.codex.stall_timeout_ms == 300000
 
 

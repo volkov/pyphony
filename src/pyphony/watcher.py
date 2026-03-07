@@ -33,7 +33,7 @@ class WorkflowWatcher:
     def load_initial(self) -> tuple[WorkflowDefinition, ServiceConfig]:
         """Load and return initial workflow + config. Raises on error."""
         wf = load_workflow(self._path)
-        config = service_config_from_workflow(wf.config)
+        config = service_config_from_workflow(wf.config, workflow_path=self._path)
         self._last_good_workflow = wf
         self._last_good_config = config
         return wf, config
@@ -65,7 +65,7 @@ class WorkflowWatcher:
         log.info("workflow_file_changed", path=str(self._path))
         try:
             wf = load_workflow(self._path)
-            config = service_config_from_workflow(wf.config)
+            config = service_config_from_workflow(wf.config, workflow_path=self._path)
             self._last_good_workflow = wf
             self._last_good_config = config
             log.info("workflow_reloaded")

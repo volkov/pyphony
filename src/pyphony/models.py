@@ -69,12 +69,16 @@ class AgentConfig(BaseModel):
 
 class CodexConfig(BaseModel):
     command: str = "claude"
-    approval_policy: str | None = None
-    thread_sandbox: str | None = None
-    turn_sandbox_policy: str | None = None
+    permission_mode: str = "bypassPermissions"
+    allowed_tools: list[str] = Field(
+        default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
+    )
+    disallowed_tools: list[str] = Field(default_factory=list)
+    model: str | None = None
+    max_turns: int | None = None
     turn_timeout_ms: int = 3600000
-    read_timeout_ms: int = 5000
     stall_timeout_ms: int = 300000
+    system_prompt: str | None = None
 
 
 class ServerConfig(BaseModel):

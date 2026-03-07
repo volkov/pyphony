@@ -25,7 +25,7 @@ async def _run_service(args: argparse.Namespace) -> None:
     log.info("starting_service", workflow_file=str(workflow_path))
 
     wf = load_workflow(workflow_path)
-    config = service_config_from_workflow(wf.config)
+    config = service_config_from_workflow(wf.config, workflow_path=workflow_path)
 
     errors = validate_dispatch_config(config)
     if errors:
@@ -66,7 +66,7 @@ async def _run_service(args: argparse.Namespace) -> None:
             log.info("poll_tick_start")
 
             wf = load_workflow(workflow_path)
-            new_config = service_config_from_workflow(wf.config)
+            new_config = service_config_from_workflow(wf.config, workflow_path=workflow_path)
             orchestrator.update_config(new_config)
             agent_runner._prompt_template = wf.prompt_template
 

@@ -12,6 +12,8 @@ dependencies = [
     "watchfiles>=0.21",
     "starlette>=0.37",
     "uvicorn>=0.29",
+    "claude-agent-sdk>=0.1.48",
+    "python-dotenv>=1.0",
 ]
 
 [project.scripts]

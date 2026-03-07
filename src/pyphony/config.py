@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from dotenv import load_dotenv
+
 from .errors import ConfigValidationError
 from .models import (
     AgentConfig,
@@ -75,7 +77,21 @@ def _parse_by_state(value: Any) -> dict[str, int]:
     return result
 
 
-def service_config_from_workflow(config: dict[str, Any]) -> ServiceConfig:
+def _load_dotenv_for_workflow(workflow_path: Path | str | None) -> None:
+    """Load .env file next to WORKFLOW.md if it exists. Does not override real env vars."""
+    if workflow_path is None:
+        return
+    env_path = Path(workflow_path).resolve().parent / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
+
+
+def service_config_from_workflow(
+    config: dict[str, Any],
+    workflow_path: Path | str | None = None,
+) -> ServiceConfig:
+    _load_dotenv_for_workflow(workflow_path)
+
     tracker_raw = config.get("tracker", {}) or {}
     polling_raw = config.get("polling", {}) or {}
     workspace_raw = config.get("workspace", {}) or {}
@@ -131,15 +147,36 @@ def service_config_from_workflow(config: dict[str, Any]) -> ServiceConfig:
         ),
     )
 
-    codex = CodexConfig(
-        command=codex_raw.get("command", "claude") or "claude",
-        approval_policy=codex_raw.get("approval_policy"),
-        thread_sandbox=codex_raw.get("thread_sandbox"),
-        turn_sandbox_policy=codex_raw.get("turn_sandbox_policy"),
-        turn_timeout_ms=_parse_int(codex_raw.get("turn_timeout_ms"), 3600000),
-        read_timeout_ms=_parse_int(codex_raw.get("read_timeout_ms"), 5000),
-        stall_timeout_ms=_parse_int(codex_raw.get("stall_timeout_ms"), 300000),
-    )
+    allowed_tools = codex_raw.get("allowed_tools")
+    if isinstance(allowed_tools, str):
+        allowed_tools = [s.strip() for s in allowed_tools.split(",") if s.strip()]
+    elif not isinstance(allowed_tools, list):
+        allowed_tools = None
+
+    disallowed_tools = codex_raw.get("disallowed_tools")
+    if isinstance(disallowed_tools, str):
+        disallowed_tools = [s.strip() for s in disallowed_tools.split(",") if s.strip()]
+    elif not isinstance(disallowed_tools, list):
+        disallowed_tools = None
+
+    codex_kwargs: dict[str, Any] = {
+        "command": codex_raw.get("command", "claude") or "claude",
+        "permission_mode": codex_raw.get("permission_mode", "bypassPermissions"),
+        "turn_timeout_ms": _parse_int(codex_raw.get("turn_timeout_ms"), 3600000),
+        "stall_timeout_ms": _parse_int(codex_raw.get("stall_timeout_ms"), 300000),
+    }
+    if allowed_tools is not None:
+        codex_kwargs["allowed_tools"] = allowed_tools
+    if disallowed_tools is not None:
+        codex_kwargs["disallowed_tools"] = disallowed_tools
+    if codex_raw.get("model"):
+        codex_kwargs["model"] = codex_raw["model"]
+    if codex_raw.get("max_turns") is not None:
+        codex_kwargs["max_turns"] = _parse_int(codex_raw.get("max_turns"), None)
+    if codex_raw.get("system_prompt"):
+        codex_kwargs["system_prompt"] = codex_raw["system_prompt"]
+
+    codex = CodexConfig(**codex_kwargs)
 
     server = ServerConfig(
         port=server_raw.get("port") if isinstance(server_raw.get("port"), int) else None,

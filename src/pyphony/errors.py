@@ -82,29 +82,9 @@ class InvalidWorkspaceCwd(AgentError):
     pass
 
 
-class ResponseTimeout(AgentError):
-    pass
-
-
-class TurnTimeout(AgentError):
-    pass
-
-
 class AgentProcessExit(AgentError):
     pass
 
 
-class ResponseError(AgentError):
-    pass
-
-
-class TurnFailed(AgentError):
-    pass
-
-
-class TurnCancelled(AgentError):
-    pass
-
-
-class TurnInputRequired(AgentError):
+class TurnTimeout(AgentError):
     pass
