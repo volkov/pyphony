@@ -62,6 +62,14 @@ class LinearMissingEndCursor(TrackerError):
     pass
 
 
+class HookError(PyphonyError):
+    pass
+
+
+class HookTimeoutError(HookError):
+    pass
+
+
 class AgentError(PyphonyError):
     pass
 

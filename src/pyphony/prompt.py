@@ -1,0 +1,40 @@
+from __future__ import annotations
+
+from jinja2 import (
+    Environment,
+    StrictUndefined,
+    TemplateAssertionError,
+    TemplateSyntaxError,
+    UndefinedError,
+)
+
+from pyphony.errors import TemplateParseError, TemplateRenderError
+from pyphony.models import Issue
+
+DEFAULT_PROMPT = "You are working on an issue from Linear."
+
+
+def render_prompt(
+    template: str,
+    issue: Issue,
+    attempt: int | None = None,
+) -> str:
+    body = template.strip()
+    if not body:
+        return DEFAULT_PROMPT
+
+    env = Environment(undefined=StrictUndefined)
+
+    try:
+        tpl = env.from_string(body)
+    except TemplateAssertionError as exc:
+        raise TemplateRenderError(str(exc)) from exc
+    except TemplateSyntaxError as exc:
+        raise TemplateParseError(str(exc)) from exc
+
+    try:
+        return tpl.render(issue=issue.model_dump(), attempt=attempt)
+    except UndefinedError as exc:
+        raise TemplateRenderError(str(exc)) from exc
+    except Exception as exc:
+        raise TemplateRenderError(str(exc)) from exc
