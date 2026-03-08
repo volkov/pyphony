@@ -5,9 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from collections.abc import AsyncIterator
 from datetime import datetime, timezone
-from typing import Any
 
 import httpx
 from claude_agent_sdk import (
@@ -32,14 +30,6 @@ from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
 log = structlog.stdlib.get_logger()
-
-
-async def _keep_alive_prompt(
-    prompt_text: str, done_event: asyncio.Event
-) -> AsyncIterator[dict[str, Any]]:
-    """Yield one user message then block until done, keeping stdin open."""
-    yield {"role": "user", "content": prompt_text}
-    await done_event.wait()
 
 
 class AgentRunner:
@@ -124,24 +114,35 @@ class AgentRunner:
                     stderr=lambda line: stderr_file.write(line + "\n"),
                 )
 
-                # 5. Run query with streaming prompt to keep stdin open
+                log.info(
+                    "agent_options",
+                    issue_identifier=issue.identifier,
+                    cwd=workspace.path,
+                    permission_mode=codex.permission_mode,
+                    allowed_tools=codex.allowed_tools,
+                    disallowed_tools=codex.disallowed_tools,
+                    model=codex.model,
+                    max_turns=options.max_turns,
+                    system_prompt_len=len(codex.system_prompt) if codex.system_prompt else 0,
+                    cli_path=options.cli_path,
+                    mcp_servers=list(mcp_servers.keys()) if mcp_servers else [],
+                    prompt_len=len(prompt),
+                )
+
+                # 5. Run query (SDK keeps stdin open for MCP servers automatically)
                 # Remove CLAUDECODE to allow launching from within a Claude Code session
                 os.environ.pop("CLAUDECODE", None)
-                done_event = asyncio.Event()
-                try:
-                    async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
-                        async for message in query(
-                            prompt=_keep_alive_prompt(prompt, done_event),
-                            options=options,
-                        ):
-                            if isinstance(message, ResultMessage):
-                                if message.is_error:
-                                    run_attempt.status = "failed"
-                                    run_attempt.error = message.result or "agent_error"
-                                else:
-                                    run_attempt.status = "completed"
-                finally:
-                    done_event.set()
+                async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
+                    async for message in query(
+                        prompt=prompt,
+                        options=options,
+                    ):
+                        if isinstance(message, ResultMessage):
+                            if message.is_error:
+                                run_attempt.status = "failed"
+                                run_attempt.error = message.result or "agent_error"
+                            else:
+                                run_attempt.status = "completed"
 
                 # 6. Run after_run hook
                 await self._workspace_mgr.run_after_run(workspace.path)
