@@ -100,6 +100,61 @@ class TestServiceConfigFromWorkflow:
         assert cfg.server.port is None
 
 
+class TestDotenvSupport:
+    """Tests for .env file loading via python-dotenv."""
+
+    def test_var_resolved_from_dotenv_file(self, tmp_path):
+        """$VAR resolves from .env file when not set in real environment."""
+        workflow = tmp_path / "WORKFLOW.md"
+        workflow.write_text("---\n---\n")
+        env_file = tmp_path / ".env"
+        env_file.write_text("MY_DOTENV_SECRET=from-dotenv\n")
+
+        # Make sure variable is NOT in real env
+        os.environ.pop("MY_DOTENV_SECRET", None)
+
+        cfg = service_config_from_workflow(
+            {"tracker": {"api_key": "$MY_DOTENV_SECRET", "kind": "linear"}},
+            workflow_path=str(workflow),
+        )
+        assert cfg.tracker.api_key == "from-dotenv"
+
+        # Cleanup
+        os.environ.pop("MY_DOTENV_SECRET", None)
+
+    def test_real_env_var_overrides_dotenv(self, tmp_path, monkeypatch):
+        """Real environment variable takes priority over .env file value."""
+        workflow = tmp_path / "WORKFLOW.md"
+        workflow.write_text("---\n---\n")
+        env_file = tmp_path / ".env"
+        env_file.write_text("PRIORITY_TEST_VAR=from-dotenv\n")
+
+        monkeypatch.setenv("PRIORITY_TEST_VAR", "from-real-env")
+
+        cfg = service_config_from_workflow(
+            {"tracker": {"api_key": "$PRIORITY_TEST_VAR", "kind": "linear"}},
+            workflow_path=str(workflow),
+        )
+        assert cfg.tracker.api_key == "from-real-env"
+
+    def test_missing_dotenv_file_does_not_raise(self, tmp_path):
+        """Absent .env file should not cause any error."""
+        workflow = tmp_path / "WORKFLOW.md"
+        workflow.write_text("---\n---\n")
+        # No .env file created
+
+        cfg = service_config_from_workflow(
+            {"tracker": {"kind": "linear"}},
+            workflow_path=str(workflow),
+        )
+        assert cfg.tracker.kind == "linear"
+
+    def test_missing_workflow_path_does_not_raise(self):
+        """workflow_path=None should not cause any error."""
+        cfg = service_config_from_workflow({"tracker": {"kind": "linear"}}, workflow_path=None)
+        assert cfg.tracker.kind == "linear"
+
+
 class TestValidateDispatchConfig:
     def _valid_config(self, **overrides):
         from pyphony.models import ServiceConfig, TrackerConfig, CodexConfig

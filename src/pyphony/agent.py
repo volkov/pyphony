@@ -7,6 +7,7 @@ import logging
 import os
 from datetime import datetime, timezone
 
+import httpx
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKError,
@@ -15,6 +16,8 @@ from claude_agent_sdk import (
     ResultMessage,
     query,
 )
+
+from pyphony.linear_tool import create_linear_tool
 
 from pyphony.models import (
     Issue,
@@ -70,6 +73,15 @@ class AgentRunner:
 
             # 4. Build SDK options
             codex = self._config.codex
+            mcp_servers = {}
+            tracker = self._config.tracker
+            if tracker.kind == "linear" and tracker.api_key:
+                mcp_servers["linear"] = create_linear_tool(
+                    endpoint=tracker.endpoint,
+                    api_key=tracker.api_key,
+                    http_client=httpx.AsyncClient(timeout=30.0),
+                )
+
             options = ClaudeAgentOptions(
                 cwd=workspace.path,
                 permission_mode=codex.permission_mode,
@@ -79,6 +91,7 @@ class AgentRunner:
                 max_turns=codex.max_turns or self._config.agent.max_turns,
                 system_prompt=codex.system_prompt,
                 cli_path=codex.command if codex.command != "claude" else None,
+                mcp_servers=mcp_servers or None,
             )
 
             # 5. Run query with timeout
