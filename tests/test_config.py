@@ -16,7 +16,7 @@ class TestServiceConfigFromWorkflow:
         assert cfg.polling.interval_ms == 30000
         assert cfg.hooks.timeout_ms == 60000
         assert cfg.agent.max_concurrent_agents == 10
-        assert cfg.agent.max_turns == 20
+        assert cfg.agent.max_turns == 200
         assert cfg.agent.max_retry_backoff_ms == 300000
         assert cfg.codex.command == "claude"
         assert cfg.codex.turn_timeout_ms == 3600000
