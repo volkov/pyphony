@@ -76,8 +76,8 @@ def configure_logging(
     console_formatter = structlog.stdlib.ProcessorFormatter(
         processors=[
             structlog.stdlib.ExtraAdder(),
-            _strip_internal_keys,
             structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            _strip_internal_keys,
             structlog.dev.ConsoleRenderer(),
         ],
     )
@@ -90,8 +90,8 @@ def configure_logging(
         file_formatter = structlog.stdlib.ProcessorFormatter(
             processors=[
                 structlog.stdlib.ExtraAdder(),
-                _strip_internal_keys,
                 structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+                _strip_internal_keys,
                 structlog.dev.ConsoleRenderer(colors=False),
             ],
         )
