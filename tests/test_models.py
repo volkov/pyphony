@@ -96,7 +96,7 @@ class TestServiceConfig:
         assert cfg.workspace.root is None
         assert cfg.hooks.timeout_ms == 60000
         assert cfg.agent.max_concurrent_agents == 10
-        assert cfg.agent.max_turns == 20
+        assert cfg.agent.max_turns == 100
         assert cfg.agent.max_retry_backoff_ms == 300000
         assert cfg.codex.command == "claude"
         assert cfg.codex.permission_mode == "bypassPermissions"
