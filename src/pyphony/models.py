@@ -63,6 +63,7 @@ class HooksConfig(BaseModel):
 class AgentConfig(BaseModel):
     max_concurrent_agents: int = 10
     max_turns: int = 100
+    max_retries: int = 1
     max_retry_backoff_ms: int = 300000
     max_concurrent_agents_by_state: dict[str, int] = Field(default_factory=dict)
 

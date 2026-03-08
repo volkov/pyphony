@@ -92,32 +92,42 @@ class AgentRunner:
                     http_client=httpx.AsyncClient(timeout=30.0),
                 )
 
-            options = ClaudeAgentOptions(
-                cwd=workspace.path,
-                permission_mode=codex.permission_mode,
-                allowed_tools=codex.allowed_tools,
-                disallowed_tools=codex.disallowed_tools if codex.disallowed_tools else None,
-                model=codex.model,
-                max_turns=codex.max_turns or self._config.agent.max_turns,
-                system_prompt=codex.system_prompt,
-                cli_path=codex.command if codex.command != "claude" else None,
-                mcp_servers=mcp_servers or None,
+            # 4b. Open stderr log file
+            stderr_path = os.path.join(
+                workspace.path, f".claude-stderr-{attempt or 0}.log"
             )
+            stderr_file = open(stderr_path, "w")
 
-            # 5. Run query with timeout
-            # Remove CLAUDECODE to allow launching from within a Claude Code session
-            os.environ.pop("CLAUDECODE", None)
-            async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
-                async for message in query(prompt=prompt, options=options):
-                    if isinstance(message, ResultMessage):
-                        if message.is_error:
-                            run_attempt.status = "failed"
-                            run_attempt.error = message.result or "agent_error"
-                        else:
-                            run_attempt.status = "completed"
+            try:
+                options = ClaudeAgentOptions(
+                    cwd=workspace.path,
+                    permission_mode=codex.permission_mode,
+                    allowed_tools=codex.allowed_tools,
+                    disallowed_tools=codex.disallowed_tools if codex.disallowed_tools else None,
+                    model=codex.model,
+                    max_turns=codex.max_turns or self._config.agent.max_turns,
+                    system_prompt=codex.system_prompt,
+                    cli_path=codex.command if codex.command != "claude" else None,
+                    mcp_servers=mcp_servers or None,
+                    stderr=lambda line: stderr_file.write(line + "\n"),
+                )
 
-            # 6. Run after_run hook
-            await self._workspace_mgr.run_after_run(workspace.path)
+                # 5. Run query with timeout
+                # Remove CLAUDECODE to allow launching from within a Claude Code session
+                os.environ.pop("CLAUDECODE", None)
+                async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
+                    async for message in query(prompt=prompt, options=options):
+                        if isinstance(message, ResultMessage):
+                            if message.is_error:
+                                run_attempt.status = "failed"
+                                run_attempt.error = message.result or "agent_error"
+                            else:
+                                run_attempt.status = "completed"
+
+                # 6. Run after_run hook
+                await self._workspace_mgr.run_after_run(workspace.path)
+            finally:
+                stderr_file.close()
 
         except TimeoutError:
             run_attempt.status = "failed"
@@ -137,6 +147,11 @@ class AgentRunner:
             log.exception("Unexpected error in agent run")
 
         elapsed_s = round(time.monotonic() - start_mono, 2)
+        stderr_log = (
+            os.path.join(run_attempt.workspace_path, f".claude-stderr-{attempt or 0}.log")
+            if run_attempt.workspace_path
+            else None
+        )
         log.info(
             "agent_finish",
             issue_identifier=issue.identifier,
@@ -144,6 +159,7 @@ class AgentRunner:
             error=run_attempt.error,
             elapsed_s=elapsed_s,
             workspace_path=run_attempt.workspace_path,
+            stderr_log=stderr_log,
         )
 
         return run_attempt

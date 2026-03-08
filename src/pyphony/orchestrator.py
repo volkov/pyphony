@@ -211,6 +211,9 @@ class Orchestrator:
             output_tokens=session.agent_output_tokens,
         )
 
+        current_attempt = entry.attempt.attempt or 0
+        max_retries = self._config.agent.max_retries
+
         if normal:
             self._schedule_retry(
                 issue_id=issue_id,
@@ -220,15 +223,25 @@ class Orchestrator:
                 error=None,
             )
         else:
-            current_attempt = (entry.attempt.attempt or 0) + 1
+            next_attempt = current_attempt + 1
+            if current_attempt >= max_retries:
+                log.warning(
+                    "max_retries_exceeded",
+                    issue_identifier=entry.issue.identifier,
+                    attempt=current_attempt,
+                    max_retries=max_retries,
+                    error=error,
+                )
+                self._release_claim(issue_id)
+                return
             delay_ms = min(
-                10000 * (2 ** (current_attempt - 1)),
+                10000 * (2 ** (next_attempt - 1)),
                 self._config.agent.max_retry_backoff_ms,
             )
             self._schedule_retry(
                 issue_id=issue_id,
                 identifier=entry.issue.identifier,
-                attempt=current_attempt,
+                attempt=next_attempt,
                 delay_ms=delay_ms,
                 error=error,
             )
