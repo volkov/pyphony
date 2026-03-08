@@ -23,7 +23,7 @@ LIFECYCLE_EVENTS = {
 
 DEFAULT_LOG_FILE = "logs/lifecycle.log"
 
-_INTERNAL_KEYS = frozenset({"_from_structlog", "_record", "_logger", "_name"})
+_INTERNAL_KEYS = frozenset({"_from_structlog", "_logger", "_name"})
 
 
 class LifecycleFilter(logging.Filter):
