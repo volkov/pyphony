@@ -110,6 +110,7 @@ class RunAttempt(BaseModel):
     started_at: datetime | None = None
     status: str = "pending"
     error: str | None = None
+    transcript_path: str | None = None
 
 
 class LiveSession(BaseModel):

@@ -6,6 +6,7 @@ import asyncio
 import os
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
 import httpx
 from claude_agent_sdk import (
@@ -30,6 +31,13 @@ from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
 log = structlog.stdlib.get_logger()
+
+
+def _transcript_path(cwd: str, session_id: str) -> str:
+    """Build the expected Claude Code transcript file path."""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))
+    sanitized = cwd.replace("/", "-").replace("_", "-")
+    return os.path.join(config_dir, "projects", sanitized, f"{session_id}.jsonl")
 
 
 class AgentRunner:
@@ -138,6 +146,9 @@ class AgentRunner:
                         options=options,
                     ):
                         if isinstance(message, ResultMessage):
+                            run_attempt.transcript_path = _transcript_path(
+                                workspace.path, message.session_id
+                            )
                             if message.is_error:
                                 run_attempt.status = "failed"
                                 run_attempt.error = message.result or "agent_error"
@@ -182,6 +193,7 @@ class AgentRunner:
             elapsed_s=elapsed_s,
             workspace_path=run_attempt.workspace_path,
             stderr_log=stderr_log,
+            transcript=run_attempt.transcript_path,
         )
 
         return run_attempt
