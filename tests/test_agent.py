@@ -232,7 +232,11 @@ class TestAgentRunner:
         await runner.run(issue)
 
         assert "prompt" in captured_kwargs
-        assert "TEST-1" in captured_kwargs["prompt"]
+        # prompt is now an async iterable; consume it to verify content
+        prompt_iter = captured_kwargs["prompt"]
+        messages = [msg async for msg in prompt_iter]
+        assert len(messages) >= 1
+        assert "TEST-1" in messages[0]["content"]
         options = captured_kwargs["options"]
         assert options.permission_mode == "bypassPermissions"
         assert options.max_turns == 3  # from agent config
