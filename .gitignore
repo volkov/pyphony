@@ -8,3 +8,4 @@ build/
 .env
 .idea/
 .claude/worktrees/
+logs/

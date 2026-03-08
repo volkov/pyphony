@@ -29,8 +29,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-file",
-        default=None,
-        help="Path to agent lifecycle debug log file (JSON format)",
+        default="logs/lifecycle.log",
+        help="Path to lifecycle log file (default: logs/lifecycle.log)",
     )
     return parser.parse_args(argv)
 
