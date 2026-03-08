@@ -230,7 +230,7 @@ class TestPollTick:
 
 
 class TestRetry:
-    def test_normal_exit_schedules_continuation(self, tmp_path):
+    def test_normal_exit_releases_claim_default_max_runs(self, tmp_path):
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -250,11 +250,10 @@ class TestRetry:
 
         orch._on_worker_exit(issue.id, normal=True, error=None)
 
-        assert issue.id in orch.state.retry_attempts
-        retry = orch.state.retry_attempts[issue.id]
-        assert retry.attempt == 1
+        assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
 
-    def test_abnormal_exit_exponential_backoff(self, tmp_path):
+    def test_abnormal_exit_releases_claim_default_max_runs(self, tmp_path):
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -270,13 +269,65 @@ class TestRetry:
                 started_at=datetime.now(timezone.utc),
             ),
         )
+        orch.state.claimed.add(issue.id)
 
         orch._on_worker_exit(issue.id, normal=False, error="crash")
 
+        assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
+
+    def test_max_runs_allows_retries(self, tmp_path):
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=3))
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        from pyphony.models import RunAttempt, RunningEntry
+
+        # First run (attempt=0) → should schedule retry
+        orch.state.running[issue.id] = RunningEntry(
+            issue=issue,
+            attempt=RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                started_at=datetime.now(timezone.utc),
+            ),
+        )
+        orch.state.claimed.add(issue.id)
+        orch._on_worker_exit(issue.id, normal=True, error=None)
         assert issue.id in orch.state.retry_attempts
-        retry = orch.state.retry_attempts[issue.id]
-        assert retry.attempt == 1
-        assert retry.error == "crash"
+        assert orch.state.retry_attempts[issue.id].attempt == 1
+
+        # Second run (attempt=1) → should schedule retry
+        orch.state.running[issue.id] = RunningEntry(
+            issue=issue,
+            attempt=RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                started_at=datetime.now(timezone.utc),
+                attempt=1,
+            ),
+        )
+        orch.state.retry_attempts.pop(issue.id, None)
+        orch._on_worker_exit(issue.id, normal=False, error="crash")
+        assert issue.id in orch.state.retry_attempts
+        assert orch.state.retry_attempts[issue.id].attempt == 2
+
+        # Third run (attempt=2) → should release (max_runs=3 reached)
+        orch.state.running[issue.id] = RunningEntry(
+            issue=issue,
+            attempt=RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                started_at=datetime.now(timezone.utc),
+                attempt=2,
+            ),
+        )
+        orch.state.retry_attempts.pop(issue.id, None)
+        orch._on_worker_exit(issue.id, normal=True, error=None)
+        assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
 
 
 class TestReconciliation:

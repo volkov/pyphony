@@ -141,7 +141,7 @@ def service_config_from_workflow(
     agent = AgentConfig(
         max_concurrent_agents=_parse_int(agent_raw.get("max_concurrent_agents"), 10),
         max_turns=_parse_int(agent_raw.get("max_turns"), 20),
-        max_retries=_parse_int(agent_raw.get("max_retries"), 1),
+        max_runs=_parse_int(agent_raw.get("max_runs"), 1),
         max_retry_backoff_ms=_parse_int(agent_raw.get("max_retry_backoff_ms"), 300000),
         max_concurrent_agents_by_state=_parse_by_state(
             agent_raw.get("max_concurrent_agents_by_state")
