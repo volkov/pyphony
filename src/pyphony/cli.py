@@ -27,6 +27,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
         help="Log level (default: INFO)",
     )
+    parser.add_argument(
+        "--log-file",
+        default=None,
+        help="Path to agent lifecycle debug log file (JSON format)",
+    )
     return parser.parse_args(argv)
 
 

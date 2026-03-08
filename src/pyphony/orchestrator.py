@@ -144,10 +144,13 @@ class Orchestrator:
 
         self._state.running[issue.id] = entry
 
+        reason = "retry" if retry_attempt > 0 else "new_issue"
         log.info(
             "dispatch",
             issue_identifier=issue.identifier,
             issue_state=issue.state,
+            attempt=retry_attempt,
+            reason=reason,
         )
 
         if self._run_agent_fn:
@@ -188,6 +191,7 @@ class Orchestrator:
         if entry is None:
             return
 
+        elapsed: float | None = None
         if entry.attempt.started_at:
             elapsed = (datetime.now(timezone.utc) - entry.attempt.started_at).total_seconds()
             self._state.agent_totals.seconds_running += elapsed
@@ -196,6 +200,16 @@ class Orchestrator:
         self._state.agent_totals.input_tokens += session.agent_input_tokens
         self._state.agent_totals.output_tokens += session.agent_output_tokens
         self._state.agent_totals.total_tokens += session.agent_total_tokens
+
+        log.info(
+            "agent_exit",
+            issue_identifier=entry.issue.identifier,
+            normal=normal,
+            error=error,
+            elapsed_s=round(elapsed, 2) if elapsed is not None else None,
+            input_tokens=session.agent_input_tokens,
+            output_tokens=session.agent_output_tokens,
+        )
 
         if normal:
             self._schedule_retry(
@@ -253,6 +267,7 @@ class Orchestrator:
             issue_identifier=identifier,
             attempt=attempt,
             delay_ms=delay_ms,
+            reason=error or "normal_completion",
         )
 
     async def _handle_retry(self, issue_id: str) -> None:

@@ -19,7 +19,7 @@ log = structlog.stdlib.get_logger()
 
 
 async def _run_service(args: argparse.Namespace) -> None:
-    configure_logging(args.log_level)
+    configure_logging(args.log_level, log_file=getattr(args, "log_file", None))
 
     workflow_path = Path(args.workflow_file)
     log.info("starting_service", workflow_file=str(workflow_path))

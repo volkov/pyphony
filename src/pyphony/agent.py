@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
+import time
 from datetime import datetime, timezone
 
 import httpx
@@ -17,6 +17,8 @@ from claude_agent_sdk import (
     query,
 )
 
+import structlog
+
 from pyphony.linear_tool import create_linear_tool
 
 from pyphony.models import (
@@ -27,7 +29,7 @@ from pyphony.models import (
 from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
-logger = logging.getLogger(__name__)
+log = structlog.stdlib.get_logger()
 
 
 class AgentRunner:
@@ -56,6 +58,14 @@ class AgentRunner:
             attempt=attempt,
             started_at=datetime.now(timezone.utc),
             status="running",
+        )
+
+        start_mono = time.monotonic()
+
+        log.info(
+            "agent_start",
+            issue_identifier=issue.identifier,
+            attempt=attempt,
         )
 
         try:
@@ -124,6 +134,16 @@ class AgentRunner:
         except Exception as exc:
             run_attempt.status = "failed"
             run_attempt.error = str(exc)
-            logger.exception("Unexpected error in agent run")
+            log.exception("Unexpected error in agent run")
+
+        elapsed_s = round(time.monotonic() - start_mono, 2)
+        log.info(
+            "agent_finish",
+            issue_identifier=issue.identifier,
+            status=run_attempt.status,
+            error=run_attempt.error,
+            elapsed_s=elapsed_s,
+            workspace_path=run_attempt.workspace_path,
+        )
 
         return run_attempt
