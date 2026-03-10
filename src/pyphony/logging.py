@@ -52,7 +52,7 @@ def configure_logging(
     ]
 
     console_formatter = structlog.stdlib.ProcessorFormatter(
-        processors=[*format_processors, structlog.dev.ConsoleRenderer()],
+        processors=[*format_processors, structlog.dev.ConsoleRenderer(pad_event_to=20)],
     )
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setFormatter(console_formatter)
@@ -63,7 +63,7 @@ def configure_logging(
         file_formatter = structlog.stdlib.ProcessorFormatter(
             processors=[
                 *format_processors,
-                structlog.dev.ConsoleRenderer(colors=False),
+                structlog.dev.ConsoleRenderer(colors=False, pad_event_to=20),
             ],
         )
         file_handler = logging.FileHandler(log_file)
