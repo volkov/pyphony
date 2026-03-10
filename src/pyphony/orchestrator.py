@@ -48,6 +48,35 @@ def _build_transcript_url(base_url: str, transcript_path: str) -> str | None:
     return f"{base_url.rstrip('/')}/#/session/{project_dir}/{session_id}"
 
 
+def _build_transcript_comment(
+    transcript_url: str,
+    transcript_path: str,
+    entry: RunningEntry,
+) -> str:
+    """Build a human-friendly comment about a running agent session.
+
+    Includes the transcript link plus instructions on how to resume
+    the session from a terminal.
+    """
+    session_id = os.path.splitext(os.path.basename(transcript_path))[0]
+    workspace_path = entry.attempt.workspace_path
+
+    lines = [
+        f"Agent started. [Transcript]({transcript_url})",
+    ]
+
+    # Add resume instructions when we have enough context.
+    if workspace_path and session_id:
+        lines.append("")
+        lines.append("To resume this session in your terminal:")
+        lines.append("```")
+        lines.append(f"cd {workspace_path}")
+        lines.append(f"claude --resume {session_id}")
+        lines.append("```")
+
+    return "\n".join(lines)
+
+
 class Orchestrator:
     def __init__(
         self,
@@ -227,7 +256,9 @@ class Orchestrator:
                 self._config.server.explorer_base_url, transcript_path
             )
             if transcript_url:
-                body = f"[Transcript]({transcript_url})"
+                body = _build_transcript_comment(
+                    transcript_url, transcript_path, entry,
+                )
                 try:
                     await self._tracker.comment_on_issue(issue.id, body)
                     log.info(
