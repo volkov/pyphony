@@ -64,3 +64,27 @@ class TestRenderPrompt:
         issue = _make_issue()
         with pytest.raises(TemplateParseError):
             render_prompt("{{ unclosed", issue)
+
+    def test_comments_appended_to_prompt(self) -> None:
+        issue = _make_issue()
+        comments = [
+            {"user": "Alice", "created_at": "2025-01-01T00:00:00Z", "body": "First comment"},
+            {"user": "Bob", "created_at": "2025-01-02T00:00:00Z", "body": "Second comment"},
+        ]
+        result = render_prompt("Hello {{ issue.identifier }}", issue, comments=comments)
+        assert "Hello ENG-123" in result
+        assert "Previous comments on this issue" in result
+        assert "Alice" in result
+        assert "First comment" in result
+        assert "Bob" in result
+        assert "Second comment" in result
+
+    def test_no_comments_section_when_empty(self) -> None:
+        issue = _make_issue()
+        result = render_prompt("Hello {{ issue.identifier }}", issue, comments=[])
+        assert "Previous comments" not in result
+
+    def test_no_comments_section_when_none(self) -> None:
+        issue = _make_issue()
+        result = render_prompt("Hello {{ issue.identifier }}", issue, comments=None)
+        assert "Previous comments" not in result

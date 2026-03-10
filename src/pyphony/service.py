@@ -44,7 +44,7 @@ async def _run_service(args: argparse.Namespace) -> None:
 
     tracker = LinearClient(config)
     workspace_mgr = WorkspaceManager(config)
-    agent_runner = AgentRunner(config, workspace_mgr, wf.prompt_template)
+    agent_runner = AgentRunner(config, workspace_mgr, wf.prompt_template, tracker=tracker)
     orchestrator = Orchestrator(
         config, tracker, workspace_mgr, run_agent_fn=agent_runner.run
     )

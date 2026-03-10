@@ -171,6 +171,23 @@ mutation IssueUpdate($issueId: String!, $input: IssueUpdateInput!) {
 }
 """
 
+ISSUE_COMMENTS_QUERY = """
+query IssueComments($issueId: String!) {
+  issue(id: $issueId) {
+    comments(first: 100) {
+      nodes {
+        id
+        body
+        createdAt
+        user {
+          name
+        }
+      }
+    }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(

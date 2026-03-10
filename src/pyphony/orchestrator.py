@@ -260,26 +260,34 @@ class Orchestrator:
         )
 
         # Post agent's last message as a comment on the issue
+        # Build comment body: use agent result if available, otherwise a fallback
         if result:
             comment_body = result
-            transcript_url = _build_transcript_url(
-                self._config.server.explorer_base_url, transcript_path
+        elif not normal and error:
+            comment_body = f"⚠️ Agent exited with error: {error}"
+        elif not normal:
+            comment_body = "⚠️ Agent exited abnormally without producing a result."
+        else:
+            comment_body = "Agent completed without producing a result."
+
+        transcript_url = _build_transcript_url(
+            self._config.server.explorer_base_url, transcript_path
+        )
+        if transcript_url:
+            comment_body += f"\n\n---\n[Transcript]({transcript_url})"
+        try:
+            await self._tracker.comment_on_issue(issue_id, comment_body)
+            log.info(
+                "comment_posted",
+                issue_identifier=entry.issue.identifier,
+                transcript_url=transcript_url,
             )
-            if transcript_url:
-                comment_body += f"\n\n---\n[Transcript]({transcript_url})"
-            try:
-                await self._tracker.comment_on_issue(issue_id, comment_body)
-                log.info(
-                    "comment_posted",
-                    issue_identifier=entry.issue.identifier,
-                    transcript_url=transcript_url,
-                )
-            except Exception as exc:
-                log.warning(
-                    "comment_post_failed",
-                    issue_identifier=entry.issue.identifier,
-                    error=str(exc),
-                )
+        except Exception as exc:
+            log.warning(
+                "comment_post_failed",
+                issue_identifier=entry.issue.identifier,
+                error=str(exc),
+            )
 
         # Transition issue based on completion and review requirements
         if normal and result and "[DONE]" in result:
