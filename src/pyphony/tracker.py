@@ -19,6 +19,7 @@ import structlog
 from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
     COMMENT_CREATE_MUTATION,
+    ISSUE_ATTACHMENTS_QUERY,
     ISSUE_CREATE_MUTATION,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
@@ -163,6 +164,23 @@ class LinearClient:
         )
         success = data.get("issueUpdate", {}).get("success", False)
         return success
+
+    async def fetch_issue_pr_urls(self, issue_id: str) -> list[str]:
+        """Return GitHub PR URLs attached to an issue."""
+        data = await self._execute(
+            ISSUE_ATTACHMENTS_QUERY,
+            {"issueId": issue_id},
+        )
+        issue_node = data.get("issue")
+        if not issue_node:
+            return []
+
+        urls: list[str] = []
+        for attachment in (issue_node.get("attachments") or {}).get("nodes", []):
+            url = attachment.get("url", "")
+            if url and ("github.com" in url) and ("/pull/" in url):
+                urls.append(url)
+        return urls
 
     async def comment_on_issue(self, issue_id: str, body: str) -> bool:
         """Post a comment on an issue. Returns True on success."""
