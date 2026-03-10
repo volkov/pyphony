@@ -22,10 +22,10 @@ query CandidateIssues($projectSlug: String!, $stateNames: [String!]!, $first: In
       branchName
       url
       labels { nodes { name } }
-      relations(first: 100) {
+      inverseRelations(first: 100) {
         nodes {
           type
-          relatedIssue {
+          issue {
             id
             identifier
             state { name }
@@ -169,10 +169,10 @@ query IssueFullByIdentifier($filter: IssueFilter!, $first: Int!) {
       branchName
       url
       labels { nodes { name } }
-      relations(first: 100) {
+      inverseRelations(first: 100) {
         nodes {
           type
-          relatedIssue {
+          issue {
             id
             identifier
             state { name }
@@ -266,10 +266,10 @@ query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int
       branchName
       url
       labels { nodes { name } }
-      relations(first: 100) {
+      inverseRelations(first: 100) {
         nodes {
           type
-          relatedIssue {
+          issue {
             id
             identifier
             state { name }

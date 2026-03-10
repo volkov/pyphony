@@ -58,7 +58,7 @@ def _issue_node(
         "branchName": branch_name,
         "url": url,
         "labels": {"nodes": label_nodes},
-        "relations": {"nodes": relations or []},
+        "inverseRelations": {"nodes": relations or []},
         "createdAt": created_at,
         "updatedAt": updated_at,
     }
@@ -96,7 +96,7 @@ class TestFetchCandidateIssuesSinglePage:
                         relations=[
                             {
                                 "type": "blocks",
-                                "relatedIssue": {
+                                "issue": {
                                     "id": "blocker-id",
                                     "identifier": "PROJ-2",
                                     "state": {"name": "In Progress"},
@@ -204,7 +204,7 @@ class TestNormalization:
                         relations=[
                             {
                                 "type": "blocks",
-                                "relatedIssue": {
+                                "issue": {
                                     "id": "b1",
                                     "identifier": "PROJ-9",
                                     "state": {"name": "Done"},
@@ -212,7 +212,7 @@ class TestNormalization:
                             },
                             {
                                 "type": "related",
-                                "relatedIssue": {
+                                "issue": {
                                     "id": "r1",
                                     "identifier": "PROJ-10",
                                     "state": {"name": "Todo"},

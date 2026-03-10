@@ -206,9 +206,9 @@ async def _check_issue(args: argparse.Namespace) -> None:
 
         # Check: blockers
         blockers = []
-        for rel in (issue_node.get("relations", {}) or {}).get("nodes", []):
+        for rel in (issue_node.get("inverseRelations", {}) or {}).get("nodes", []):
             if rel.get("type") == "blocks":
-                related = rel.get("relatedIssue", {})
+                related = rel.get("issue", {})
                 rel_state = (related.get("state") or {}).get("name")
                 blockers.append((related.get("identifier"), related.get("title"), rel_state))
 

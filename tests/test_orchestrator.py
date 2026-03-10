@@ -88,7 +88,7 @@ def _issue_node(id="id-1", identifier="PROJ-1", title="Test", state_name="Todo",
         "branchName": None,
         "url": None,
         "labels": {"nodes": []},
-        "relations": {"nodes": []},
+        "inverseRelations": {"nodes": []},
         "createdAt": "2025-01-01T00:00:00Z",
         "updatedAt": "2025-01-01T00:00:00Z",
     }

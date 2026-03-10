@@ -552,9 +552,9 @@ class LinearClient:
         ]
 
         blocked_by: list[BlockerRef] = []
-        for rel in (node.get("relations", {}) or {}).get("nodes", []):
+        for rel in (node.get("inverseRelations", {}) or {}).get("nodes", []):
             if rel.get("type") == "blocks":
-                related = rel.get("relatedIssue", {})
+                related = rel.get("issue", {})
                 blocked_by.append(
                     BlockerRef(
                         id=related.get("id"),
