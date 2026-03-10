@@ -17,10 +17,15 @@ from .models import BlockerRef, Issue, ServiceConfig
 from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
     ISSUE_STATES_BY_IDS_QUERY,
+    ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
+    WORKFLOW_STATES_QUERY,
 )
 
+import structlog
+
 _PAGE_SIZE = 50
+log = structlog.stdlib.get_logger()
 
 
 class LinearClient:
@@ -33,6 +38,7 @@ class LinearClient:
         self._active_states = config.tracker.active_states
         self._terminal_states = config.tracker.terminal_states
         self._client = httpx.AsyncClient(timeout=30.0)
+        self._state_id_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Public methods
@@ -94,6 +100,64 @@ class LinearClient:
             "first": _PAGE_SIZE,
         }
         return await self._paginate(ISSUES_BY_STATES_QUERY, variables)
+
+    async def transition_issue_state(self, issue_id: str, target_state: str) -> bool:
+        """Transition an issue to the given workflow state name.
+
+        Returns ``True`` on success, ``False`` if the state could not be
+        resolved or the mutation failed.
+        """
+        state_id = await self._resolve_state_id(target_state)
+        if not state_id:
+            log.warning(
+                "state_id_not_found",
+                target_state=target_state,
+                project_slug=self._project_slug,
+            )
+            return False
+
+        try:
+            data = await self._execute(
+                ISSUE_UPDATE_STATE_MUTATION,
+                {"issueId": issue_id, "stateId": state_id},
+            )
+            success = (data.get("issueUpdate") or {}).get("success", False)
+            if success:
+                log.info(
+                    "issue_state_transitioned",
+                    issue_id=issue_id,
+                    target_state=target_state,
+                )
+            return success
+        except Exception as exc:
+            log.error(
+                "issue_state_transition_failed",
+                issue_id=issue_id,
+                target_state=target_state,
+                error=str(exc),
+            )
+            return False
+
+    async def _resolve_state_id(self, state_name: str) -> str | None:
+        """Return the workflow state ID for *state_name*, using a cache."""
+        if state_name in self._state_id_cache:
+            return self._state_id_cache[state_name]
+
+        try:
+            data = await self._execute(
+                WORKFLOW_STATES_QUERY,
+                {"projectSlug": self._project_slug},
+            )
+        except Exception as exc:
+            log.error("workflow_states_fetch_failed", error=str(exc))
+            return None
+
+        for project in (data.get("projects") or {}).get("nodes", []):
+            for team in (project.get("teams") or {}).get("nodes", []):
+                for state in (team.get("states") or {}).get("nodes", []):
+                    self._state_id_cache[state["name"]] = state["id"]
+
+        return self._state_id_cache.get(state_name)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

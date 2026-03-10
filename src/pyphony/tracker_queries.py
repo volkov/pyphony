@@ -2,6 +2,37 @@
 
 from __future__ import annotations
 
+WORKFLOW_STATES_QUERY = """
+query WorkflowStates($projectSlug: String!) {
+  projects(filter: { slugId: { eq: $projectSlug } }) {
+    nodes {
+      teams {
+        nodes {
+          states {
+            nodes {
+              id
+              name
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+ISSUE_UPDATE_STATE_MUTATION = """
+mutation IssueUpdateState($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    success
+    issue {
+      id
+      state { name }
+    }
+  }
+}
+"""
+
 CANDIDATE_ISSUES_QUERY = """
 query CandidateIssues($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(

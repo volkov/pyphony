@@ -229,6 +229,132 @@ class TestPollTick:
         assert "PROJ-2" in [e.issue.identifier for e in orch.state.running.values()]
 
 
+class TestInProgressTransition:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_dispatch_transitions_todo_to_in_progress(self, tmp_path):
+        """When a Todo issue is dispatched, it should be transitioned to In Progress."""
+        # First call: fetch candidates; second: workflow states; third: issue update
+        route = respx.post(ENDPOINT)
+        route.side_effect = [
+            httpx.Response(
+                200,
+                json=_graphql_response([
+                    _issue_node(id="id-1", identifier="PROJ-1", state_name="Todo"),
+                ]),
+            ),
+            # workflow states response
+            httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "projects": {
+                            "nodes": [{
+                                "teams": {
+                                    "nodes": [{
+                                        "states": {
+                                            "nodes": [
+                                                {"id": "state-todo", "name": "Todo"},
+                                                {"id": "state-ip", "name": "In Progress"},
+                                                {"id": "state-done", "name": "Done"},
+                                            ]
+                                        }
+                                    }]
+                                }
+                            }]
+                        }
+                    }
+                },
+            ),
+            # issue update response
+            httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issueUpdate": {
+                            "success": True,
+                            "issue": {"id": "id-1", "state": {"name": "In Progress"}},
+                        }
+                    }
+                },
+            ),
+        ]
+
+        async def mock_run(issue, attempt):
+            pass
+
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=mock_run)
+
+        await orch.poll_tick()
+        await tracker.close()
+
+        entry = orch.state.running["id-1"]
+        assert entry.issue.state == "In Progress"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_dispatch_skips_transition_when_already_in_progress(self, tmp_path):
+        """Issues already In Progress should not trigger a state transition."""
+        route = respx.post(ENDPOINT)
+        route.side_effect = [
+            httpx.Response(
+                200,
+                json=_graphql_response([
+                    _issue_node(id="id-1", identifier="PROJ-1", state_name="In Progress"),
+                ]),
+            ),
+        ]
+
+        async def mock_run(issue, attempt):
+            pass
+
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=mock_run)
+
+        await orch.poll_tick()
+        await tracker.close()
+
+        entry = orch.state.running["id-1"]
+        assert entry.issue.state == "In Progress"
+        # Only one HTTP call (fetch_candidates), no transition calls
+        assert route.call_count == 1
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_dispatch_continues_if_transition_fails(self, tmp_path):
+        """If the In Progress transition fails, dispatch should still proceed."""
+        route = respx.post(ENDPOINT)
+        route.side_effect = [
+            httpx.Response(
+                200,
+                json=_graphql_response([
+                    _issue_node(id="id-1", identifier="PROJ-1", state_name="Todo"),
+                ]),
+            ),
+            # workflow states fetch fails
+            httpx.Response(500, text="Internal Server Error"),
+        ]
+
+        async def mock_run(issue, attempt):
+            pass
+
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=mock_run)
+
+        await orch.poll_tick()
+        await tracker.close()
+
+        # Issue should still be dispatched even though transition failed
+        assert "id-1" in orch.state.running
+
+
 class TestRetry:
     def test_normal_exit_schedules_continuation(self, tmp_path):
         config = _make_config(tmp_path)
