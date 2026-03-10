@@ -1080,3 +1080,164 @@ class TestAutomergeOnDone:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
             assert mock_merge.call_count == 2
+
+
+class TestGracefulDrain:
+    """Tests for graceful drain on exit-on-merge."""
+
+    @pytest.mark.asyncio
+    async def test_drain_mode_skips_dispatch(self, tmp_path):
+        """In drain mode, poll_tick should not dispatch new issues."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch._draining = True
+
+        # Add a running job so drain doesn't complete
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+
+        with patch.object(tracker, "fetch_candidate_issues", new_callable=AsyncMock) as mock_fetch, \
+             patch.object(tracker, "fetch_issue_states_by_ids", new_callable=AsyncMock, return_value={issue.id: "In Progress"}):
+            stats = await orch.poll_tick()
+
+        mock_fetch.assert_not_called()
+        assert stats["dispatched"] == 0
+        assert stats["running"] == 1
+
+    @pytest.mark.asyncio
+    async def test_exit_on_merge_enters_drain_not_immediate_exit(self, tmp_path):
+        """When exit_on_merge fires with other jobs running, it should drain, not exit immediately."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        # Two issues running
+        issue1 = _make_issue(id="id-1", identifier="PROJ-1")
+        issue2 = _make_issue(id="id-2", identifier="PROJ-2")
+        orch.state.running[issue1.id] = _running_entry(issue1)
+        orch.state.running[issue2.id] = _running_entry(issue2)
+        orch.state.claimed.add(issue1.id)
+        orch.state.claimed.add(issue2.id)
+
+        # Issue 1 completes with [DONE] → triggers drain
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(issue1.id, normal=True, error=None, result="[DONE]")
+
+        # Should be draining but NOT signaled for exit yet (issue2 still running)
+        assert orch._draining
+        assert not orch.merge_detected
+        assert not orch.merge_detected_event.is_set()
+        assert issue2.id in orch.state.running
+
+    @pytest.mark.asyncio
+    async def test_drain_completes_when_last_job_finishes(self, tmp_path):
+        """After drain starts, merge_detected fires when the last running job exits."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue1 = _make_issue(id="id-1", identifier="PROJ-1")
+        issue2 = _make_issue(id="id-2", identifier="PROJ-2")
+        orch.state.running[issue1.id] = _running_entry(issue1)
+        orch.state.running[issue2.id] = _running_entry(issue2)
+        orch.state.claimed.add(issue1.id)
+        orch.state.claimed.add(issue2.id)
+
+        # Issue 1 completes with [DONE] → enters drain
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(issue1.id, normal=True, error=None, result="[DONE]")
+
+        assert orch._draining
+        assert not orch.merge_detected_event.is_set()
+
+        # Issue 2 finishes (no [DONE], just normal exit) → drain completes
+        await orch._on_worker_exit(issue2.id, normal=True, error=None, result="some result")
+
+        assert orch.merge_detected
+        assert orch.merge_detected_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_drain_cancels_pending_retries(self, tmp_path):
+        """Entering drain mode should cancel all pending retries."""
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=5))
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        # Schedule a retry
+        orch._schedule_retry(
+            issue_id="retry-id",
+            identifier="PROJ-R",
+            attempt=1,
+            delay_ms=60000,
+            error=None,
+        )
+        assert "retry-id" in orch.state.retry_attempts
+
+        # A running issue and the trigger issue
+        trigger = _make_issue(id="id-t", identifier="PROJ-T")
+        orch.state.running[trigger.id] = _running_entry(trigger)
+        orch.state.claimed.add(trigger.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(trigger.id, normal=True, error=None, result="[DONE]")
+
+        assert orch._draining
+        assert len(orch.state.retry_attempts) == 0
+
+    @pytest.mark.asyncio
+    async def test_drain_immediate_when_no_other_jobs(self, tmp_path):
+        """If the triggering job is the only one, drain completes immediately."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert orch._draining
+        assert orch.merge_detected
+        assert orch.merge_detected_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_drain_poll_tick_signals_when_empty(self, tmp_path):
+        """poll_tick in drain mode signals exit when running becomes empty."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+        orch._draining = True
+
+        # No running jobs
+        stats = await orch.poll_tick()
+
+        assert orch.merge_detected
+        assert orch.merge_detected_event.is_set()
+        assert stats["running"] == 0
