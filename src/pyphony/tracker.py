@@ -21,6 +21,7 @@ from .tracker_queries import (
     COMMENT_CREATE_MUTATION,
     ISSUE_ATTACHMENTS_QUERY,
     ISSUE_BY_IDENTIFIER_QUERY,
+    ISSUE_COMMENTS_QUERY,
     ISSUE_CREATE_MUTATION,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
@@ -183,6 +184,25 @@ class LinearClient:
             if url and ("github.com" in url) and ("/pull/" in url):
                 urls.append(url)
         return urls
+
+    async def fetch_issue_comments(self, issue_id: str) -> list[dict]:
+        """Fetch comments on an issue. Returns list of dicts with body, createdAt, user."""
+        data = await self._execute(
+            ISSUE_COMMENTS_QUERY,
+            {"issueId": issue_id},
+        )
+        issue_node = data.get("issue")
+        if not issue_node:
+            return []
+
+        comments: list[dict] = []
+        for node in (issue_node.get("comments") or {}).get("nodes", []):
+            comments.append({
+                "body": node.get("body", ""),
+                "created_at": node.get("createdAt", ""),
+                "user": (node.get("user") or {}).get("name", ""),
+            })
+        return comments
 
     async def comment_on_issue(self, issue_id: str, body: str) -> bool:
         """Post a comment on an issue. Returns True on success."""

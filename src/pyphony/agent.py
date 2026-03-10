@@ -27,6 +27,11 @@ from pyphony.models import (
 from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
+# Type alias to avoid circular import with LinearClient
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from pyphony.tracker import LinearClient
+
 log = structlog.stdlib.get_logger()
 
 
@@ -45,10 +50,12 @@ class AgentRunner:
         config: ServiceConfig,
         workspace_mgr: WorkspaceManager,
         prompt_template: str = "",
+        tracker: "LinearClient | None" = None,
     ) -> None:
         self._config = config
         self._workspace_mgr = workspace_mgr
         self._prompt_template = prompt_template
+        self._tracker = tracker
 
     async def run(
         self,
@@ -81,15 +88,27 @@ class AgentRunner:
             # 2. Run before_run hook
             await self._workspace_mgr.run_before_run(workspace.path)
 
-            # 3. Build prompt from template
+            # 3. Fetch previous comments for context
+            comments = None
+            if self._tracker:
+                try:
+                    comments = await self._tracker.fetch_issue_comments(issue.id)
+                except Exception as exc:
+                    log.warning(
+                        "fetch_comments_failed",
+                        issue_identifier=issue.identifier,
+                        error=str(exc),
+                    )
+
+            # 4. Build prompt from template
             prompt = render_prompt(
-                self._prompt_template, issue, attempt=attempt
+                self._prompt_template, issue, attempt=attempt, comments=comments
             )
 
-            # 4. Build SDK options
+            # 5. Build SDK options
             codex = self._config.codex
 
-            # 4b. Open stderr log file
+            # 5b. Open stderr log file
             stderr_path = os.path.join(
                 workspace.path, f".claude-stderr-{attempt or 0}.log"
             )
@@ -122,7 +141,7 @@ class AgentRunner:
                     prompt_len=len(prompt),
                 )
 
-                # 5. Run query
+                # 6. Run query
                 # Remove CLAUDECODE to allow launching from within a Claude Code session
                 os.environ.pop("CLAUDECODE", None)
                 async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
@@ -141,7 +160,7 @@ class AgentRunner:
                             else:
                                 run_attempt.status = "completed"
 
-                # 6. Run after_run hook
+                # 7. Run after_run hook
                 await self._workspace_mgr.run_after_run(workspace.path)
             finally:
                 stderr_file.close()

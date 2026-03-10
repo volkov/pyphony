@@ -18,23 +18,34 @@ def render_prompt(
     template: str,
     issue: Issue,
     attempt: int | None = None,
+    comments: list[dict] | None = None,
 ) -> str:
     body = template.strip()
     if not body:
-        return DEFAULT_PROMPT
+        rendered = DEFAULT_PROMPT
+    else:
+        env = Environment(undefined=StrictUndefined)
 
-    env = Environment(undefined=StrictUndefined)
+        try:
+            tpl = env.from_string(body)
+        except TemplateAssertionError as exc:
+            raise TemplateRenderError(str(exc)) from exc
+        except TemplateSyntaxError as exc:
+            raise TemplateParseError(str(exc)) from exc
 
-    try:
-        tpl = env.from_string(body)
-    except TemplateAssertionError as exc:
-        raise TemplateRenderError(str(exc)) from exc
-    except TemplateSyntaxError as exc:
-        raise TemplateParseError(str(exc)) from exc
+        try:
+            rendered = tpl.render(issue=issue.model_dump(), attempt=attempt)
+        except UndefinedError as exc:
+            raise TemplateRenderError(str(exc)) from exc
+        except Exception as exc:
+            raise TemplateRenderError(str(exc)) from exc
 
-    try:
-        return tpl.render(issue=issue.model_dump(), attempt=attempt)
-    except UndefinedError as exc:
-        raise TemplateRenderError(str(exc)) from exc
-    except Exception as exc:
-        raise TemplateRenderError(str(exc)) from exc
+    if comments:
+        rendered += "\n\n---\n## Previous comments on this issue:\n"
+        for comment in comments:
+            user = comment.get("user", "Unknown")
+            created_at = comment.get("created_at", "")
+            comment_body = comment.get("body", "")
+            rendered += f"\n**{user}** ({created_at}):\n{comment_body}\n"
+
+    return rendered

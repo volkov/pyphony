@@ -368,7 +368,8 @@ class TestRetry:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        await orch._on_worker_exit(issue.id, normal=True, error=None)
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None)
 
         assert issue.id not in orch.state.retry_attempts
         assert issue.id not in orch.state.claimed
@@ -384,7 +385,8 @@ class TestRetry:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        await orch._on_worker_exit(issue.id, normal=False, error="crash")
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=False, error="crash")
 
         assert issue.id not in orch.state.retry_attempts
         assert issue.id not in orch.state.claimed
@@ -398,26 +400,27 @@ class TestRetry:
 
         issue = _make_issue()
 
-        # First run (attempt=0) → should schedule retry
-        orch.state.running[issue.id] = _running_entry(issue, attempt=0)
-        orch.state.claimed.add(issue.id)
-        await orch._on_worker_exit(issue.id, normal=True, error=None)
-        assert issue.id in orch.state.retry_attempts
-        assert orch.state.retry_attempts[issue.id].attempt == 1
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            # First run (attempt=0) → should schedule retry
+            orch.state.running[issue.id] = _running_entry(issue, attempt=0)
+            orch.state.claimed.add(issue.id)
+            await orch._on_worker_exit(issue.id, normal=True, error=None)
+            assert issue.id in orch.state.retry_attempts
+            assert orch.state.retry_attempts[issue.id].attempt == 1
 
-        # Second run (attempt=1) → should schedule retry
-        orch.state.running[issue.id] = _running_entry(issue, attempt=1)
-        orch.state.retry_attempts.pop(issue.id, None)
-        await orch._on_worker_exit(issue.id, normal=False, error="crash")
-        assert issue.id in orch.state.retry_attempts
-        assert orch.state.retry_attempts[issue.id].attempt == 2
+            # Second run (attempt=1) → should schedule retry
+            orch.state.running[issue.id] = _running_entry(issue, attempt=1)
+            orch.state.retry_attempts.pop(issue.id, None)
+            await orch._on_worker_exit(issue.id, normal=False, error="crash")
+            assert issue.id in orch.state.retry_attempts
+            assert orch.state.retry_attempts[issue.id].attempt == 2
 
-        # Third run (attempt=2) → should release (max_runs=3 reached)
-        orch.state.running[issue.id] = _running_entry(issue, attempt=2)
-        orch.state.retry_attempts.pop(issue.id, None)
-        await orch._on_worker_exit(issue.id, normal=True, error=None)
-        assert issue.id not in orch.state.retry_attempts
-        assert issue.id not in orch.state.claimed
+            # Third run (attempt=2) → should release (max_runs=3 reached)
+            orch.state.running[issue.id] = _running_entry(issue, attempt=2)
+            orch.state.retry_attempts.pop(issue.id, None)
+            await orch._on_worker_exit(issue.id, normal=True, error=None)
+            assert issue.id not in orch.state.retry_attempts
+            assert issue.id not in orch.state.claimed
 
 
 class TestIssueTransition:
@@ -507,8 +510,8 @@ class TestCommentOnExit:
             mock_comment.assert_called_once_with(issue.id, "Here is my summary")
 
     @pytest.mark.asyncio
-    async def test_no_comment_when_no_result(self, tmp_path):
-        """No comment posted when agent has no result."""
+    async def test_fallback_comment_when_no_result(self, tmp_path):
+        """A fallback comment is posted when agent has no result."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -518,9 +521,48 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result=None)
-            mock_comment.assert_not_called()
+            mock_comment.assert_called_once()
+            body = mock_comment.call_args[0][1]
+            assert "completed without producing a result" in body
+
+    @pytest.mark.asyncio
+    async def test_fallback_comment_on_error_without_result(self, tmp_path):
+        """When agent fails with error but no result, error is posted as comment."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(issue.id, normal=False, error="segfault", result=None)
+            mock_comment.assert_called_once()
+            body = mock_comment.call_args[0][1]
+            assert "segfault" in body
+            assert "⚠️" in body
+
+    @pytest.mark.asyncio
+    async def test_fallback_comment_on_abnormal_exit_no_error(self, tmp_path):
+        """When agent exits abnormally with no error and no result, a fallback is posted."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(issue.id, normal=False, error=None, result=None)
+            mock_comment.assert_called_once()
+            body = mock_comment.call_args[0][1]
+            assert "abnormally" in body
 
     @pytest.mark.asyncio
     async def test_comment_posted_on_failed_run(self, tmp_path):
