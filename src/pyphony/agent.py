@@ -25,6 +25,7 @@ from pyphony.models import (
     RunAttempt,
     ServiceConfig,
 )
+from pyphony.normalization import normalize_label
 from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
@@ -110,7 +111,7 @@ class AgentRunner:
             # 5. Build SDK options (restrict tools for plan-only issues)
             codex = self._config.codex
             plan_required = "plan required" in [
-                label.lower() for label in issue.labels
+                normalize_label(label) for label in issue.labels
             ]
 
             # 5b. Open stderr log file

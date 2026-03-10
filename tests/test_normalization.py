@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from pyphony.models import Issue
-from pyphony.normalization import normalize_state, sanitize_workspace_key, sort_issues_for_dispatch
+from pyphony.normalization import normalize_label, normalize_state, sanitize_workspace_key, sort_issues_for_dispatch
 
 
 class TestSanitizeWorkspaceKey:
@@ -39,6 +39,29 @@ class TestNormalizeState:
 
     def test_already_normalized(self):
         assert normalize_state("done") == "done"
+
+
+class TestNormalizeLabel:
+    def test_lowercase(self):
+        assert normalize_label("Plan Required") == "plan required"
+
+    def test_hyphen_to_space(self):
+        assert normalize_label("plan-required") == "plan required"
+
+    def test_underscore_to_space(self):
+        assert normalize_label("plan_required") == "plan required"
+
+    def test_mixed(self):
+        assert normalize_label("Plan-Required") == "plan required"
+
+    def test_already_normalized(self):
+        assert normalize_label("plan required") == "plan required"
+
+    def test_strips_whitespace(self):
+        assert normalize_label("  plan required  ") == "plan required"
+
+    def test_review_required_hyphenated(self):
+        assert normalize_label("review-required") == "review required"
 
 
 class TestSortIssuesForDispatch:

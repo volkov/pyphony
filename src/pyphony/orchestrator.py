@@ -20,7 +20,7 @@ from .models import (
     RunningEntry,
     ServiceConfig,
 )
-from .normalization import normalize_state, sort_issues_for_dispatch
+from .normalization import normalize_label, normalize_state, sort_issues_for_dispatch
 from .tracker import LinearClient
 from .workspace import WorkspaceManager
 
@@ -316,9 +316,9 @@ class Orchestrator:
 
         # Transition issue based on completion and review requirements
         if normal and result and "[DONE]" in result:
-            issue_labels_lower = [label.lower() for label in entry.issue.labels]
-            review_required = "review required" in issue_labels_lower
-            plan_required = "plan required" in issue_labels_lower
+            issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
+            review_required = "review required" in issue_labels_norm
+            plan_required = "plan required" in issue_labels_norm
 
             if plan_required:
                 # Plan is complete — swap labels and move to Backlog

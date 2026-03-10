@@ -1216,6 +1216,27 @@ class TestPlanRequired:
             mock_transition.assert_called_once_with(issue.id, "Backlog")
 
     @pytest.mark.asyncio
+    async def test_plan_required_hyphenated_label(self, tmp_path):
+        """'plan-required' (with hyphen) should also trigger plan mode."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan-required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan [DONE]")
+
+            mock_labels.assert_called_once()
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+    @pytest.mark.asyncio
     async def test_plan_required_label_swap_failure_still_transitions(self, tmp_path):
         """Even if label swap fails, issue still transitions to Backlog."""
         config = _make_config(tmp_path)

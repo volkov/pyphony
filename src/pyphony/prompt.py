@@ -10,6 +10,7 @@ from jinja2 import (
 
 from pyphony.errors import TemplateParseError, TemplateRenderError
 from pyphony.models import Issue
+from pyphony.normalization import normalize_label
 
 DEFAULT_PROMPT = "You are working on an issue from Linear."
 
@@ -60,8 +61,8 @@ def render_prompt(
             rendered += f"\n**{user}** ({created_at}):\n{comment_body}\n"
 
     # Append plan-specific instructions when "plan required" label is present
-    issue_labels_lower = [label.lower() for label in issue.labels]
-    if "plan required" in issue_labels_lower:
+    issue_labels_normalized = [normalize_label(label) for label in issue.labels]
+    if "plan required" in issue_labels_normalized:
         rendered += _PLAN_REQUIRED_SUFFIX
 
     return rendered
