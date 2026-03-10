@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import time
 from datetime import datetime, timezone
@@ -42,6 +43,133 @@ def _transcript_path(cwd: str, session_id: str) -> str:
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))
     sanitized = cwd.replace("/", "-").replace("_", "-")
     return os.path.join(config_dir, "projects", sanitized, f"{session_id}.jsonl")
+
+
+def _plans_dir() -> str:
+    """Return the path to the Claude Code plans directory."""
+    config_dir = os.environ.get("CLAUDE_CONFIG_DIR", str(Path.home() / ".claude"))
+    return os.path.join(config_dir, "plans")
+
+
+def _snapshot_plan_files(plans_dir: str) -> set[str]:
+    """Return the set of plan file names currently in the plans directory."""
+    try:
+        return set(os.listdir(plans_dir))
+    except OSError:
+        return set()
+
+
+def _read_new_plan_file(plans_dir: str, before: set[str]) -> str | None:
+    """Read the newest plan file created after *before* snapshot.
+
+    Returns the file content or ``None`` if no new file was found.
+    """
+    try:
+        current = set(os.listdir(plans_dir))
+    except OSError:
+        return None
+
+    new_files = current - before
+    if not new_files:
+        return None
+
+    # Pick the newest file by mtime
+    newest: str | None = None
+    newest_mtime: float = 0.0
+    for fname in new_files:
+        fpath = os.path.join(plans_dir, fname)
+        try:
+            mtime = os.path.getmtime(fpath)
+            if mtime > newest_mtime:
+                newest = fpath
+                newest_mtime = mtime
+        except OSError:
+            continue
+
+    if newest is None:
+        return None
+
+    try:
+        return Path(newest).read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _extract_plan_from_transcript(transcript_path: str) -> str | None:
+    """Parse a Claude Code transcript JSONL and extract the full plan.
+
+    Strategy (in priority order):
+    1. Find ``ExitPlanMode`` tool-use input — that contains the full plan the
+       agent intended to submit (even if the tool errored).
+    2. Find the longest assistant text block (excluding short [DONE] messages)
+       which is likely the detailed plan output.
+    """
+    if not transcript_path:
+        return None
+
+    try:
+        lines = Path(transcript_path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+
+    exit_plan_text: str | None = None
+    longest_assistant_text: str = ""
+
+    for raw_line in lines:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            entry = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+
+        # Strategy 1: ExitPlanMode tool-use input
+        if entry.get("type") == "tool_use" and entry.get("name") == "ExitPlanMode":
+            plan_input = entry.get("input", {})
+            if isinstance(plan_input, dict):
+                text = plan_input.get("plan") or plan_input.get("text") or plan_input.get("content") or ""
+            elif isinstance(plan_input, str):
+                text = plan_input
+            else:
+                text = ""
+            if text and (not exit_plan_text or len(text) > len(exit_plan_text)):
+                exit_plan_text = text
+
+        # Also check nested content blocks (Claude Code transcript format)
+        if entry.get("type") == "assistant" and isinstance(entry.get("message"), dict):
+            for block in entry["message"].get("content", []):
+                # Check tool_use blocks inside assistant messages
+                if (
+                    isinstance(block, dict)
+                    and block.get("type") == "tool_use"
+                    and block.get("name") == "ExitPlanMode"
+                ):
+                    plan_input = block.get("input", {})
+                    if isinstance(plan_input, dict):
+                        text = plan_input.get("plan") or plan_input.get("text") or plan_input.get("content") or ""
+                    elif isinstance(plan_input, str):
+                        text = plan_input
+                    else:
+                        text = ""
+                    if text and (not exit_plan_text or len(text) > len(exit_plan_text)):
+                        exit_plan_text = text
+
+                # Strategy 2: collect assistant text blocks
+                if isinstance(block, dict) and block.get("type") == "text":
+                    text = block.get("text", "")
+                    if len(text) > len(longest_assistant_text):
+                        longest_assistant_text = text
+
+    if exit_plan_text:
+        return exit_plan_text
+
+    # Only use the longest assistant text if it's substantially longer than a
+    # typical short summary (at least 200 chars) to avoid false positives.
+    if len(longest_assistant_text) >= 200:
+        return longest_assistant_text
+
+    return None
 
 
 class AgentRunner:
@@ -113,6 +241,11 @@ class AgentRunner:
             plan_required = "plan required" in [
                 normalize_label(label) for label in issue.labels
             ]
+
+            # 5a. Snapshot plan files so we can detect new ones after the run
+            plans_before: set[str] = set()
+            if plan_required:
+                plans_before = _snapshot_plan_files(_plans_dir())
 
             # 5b. Open stderr log file
             stderr_path = os.path.join(
@@ -205,6 +338,24 @@ class AgentRunner:
 
                 # 7. Run after_run hook
                 await self._workspace_mgr.run_after_run(workspace.path)
+
+                # 8. For plan-required issues, extract the full plan text
+                if plan_required:
+                    plan_text = _read_new_plan_file(_plans_dir(), plans_before)
+                    plan_source = "plan_file"
+                    if not plan_text:
+                        plan_text = _extract_plan_from_transcript(
+                            run_attempt.transcript_path
+                        )
+                        plan_source = "transcript"
+                    if plan_text:
+                        run_attempt.plan_text = plan_text
+                        log.info(
+                            "plan_extracted",
+                            issue_identifier=issue.identifier,
+                            plan_len=len(plan_text),
+                            source=plan_source,
+                        )
             finally:
                 stderr_file.close()
 

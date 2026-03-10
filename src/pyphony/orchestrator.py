@@ -302,8 +302,15 @@ class Orchestrator:
         )
 
         # Post agent's last message as a comment on the issue
-        # Build comment body: use agent result if available, otherwise a fallback
-        if result:
+        # For plan-required issues, prefer the full plan text over the
+        # (potentially abbreviated) final assistant message.
+        plan_text = getattr(entry.attempt, "plan_text", None)
+        issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
+        is_plan_required = "plan required" in issue_labels_norm
+
+        if is_plan_required and plan_text:
+            comment_body = plan_text
+        elif result:
             comment_body = result
         elif not normal and error:
             comment_body = f"⚠️ Agent exited with error: {error}"
@@ -326,8 +333,7 @@ class Orchestrator:
             )
 
         # Transition issue based on completion and review requirements
-        issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
-        plan_required = "plan required" in issue_labels_norm
+        plan_required = is_plan_required
         done_signaled = normal and result and "[DONE]" in result
 
         # For plan-required issues, a normal exit is sufficient to trigger

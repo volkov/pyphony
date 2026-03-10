@@ -113,6 +113,7 @@ class RunAttempt(BaseModel):
     status: str = "pending"
     error: str | None = None
     result: str | None = None
+    plan_text: str | None = None
     transcript_path: str | None = None
 
 
