@@ -53,7 +53,10 @@ def render_prompt(
             raise TemplateRenderError(str(exc)) from exc
 
     if comments:
-        rendered += "\n\n---\n## Previous comments on this issue:\n"
+        updated_str = ""
+        if issue.updated_at:
+            updated_str = f" (updated: {issue.updated_at.strftime('%Y-%m-%d %H:%M UTC')})"
+        rendered += f"\n\n---\n## Comments on this issue{updated_str}:\n"
         for comment in comments:
             user = comment.get("user", "Unknown")
             created_at = comment.get("created_at", "")

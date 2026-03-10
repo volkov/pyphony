@@ -73,7 +73,7 @@ class TestRenderPrompt:
         ]
         result = render_prompt("Hello {{ issue.identifier }}", issue, comments=comments)
         assert "Hello ENG-123" in result
-        assert "Previous comments on this issue" in result
+        assert "Comments on this issue" in result
         assert "Alice" in result
         assert "First comment" in result
         assert "Bob" in result
@@ -82,12 +82,12 @@ class TestRenderPrompt:
     def test_no_comments_section_when_empty(self) -> None:
         issue = _make_issue()
         result = render_prompt("Hello {{ issue.identifier }}", issue, comments=[])
-        assert "Previous comments" not in result
+        assert "Comments on this issue" not in result
 
     def test_no_comments_section_when_none(self) -> None:
         issue = _make_issue()
         result = render_prompt("Hello {{ issue.identifier }}", issue, comments=None)
-        assert "Previous comments" not in result
+        assert "Comments on this issue" not in result
 
     def test_plan_required_label_appends_plan_instructions(self) -> None:
         issue = _make_issue(labels=["plan required"])
