@@ -13,6 +13,7 @@ agent:
   max_concurrent_agents: 5
 codex:
   command: claude
+  stall_timeout_ms: 1800000
 ---
 Ты работаешь над {{ issue.identifier }}: {{ issue.title }}
 
