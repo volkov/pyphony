@@ -2,7 +2,7 @@ import argparse
 import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
@@ -15,15 +15,16 @@ from pyphony.models import (
     TrackerConfig,
     WorkspaceConfig,
     CodexConfig,
+    PollingConfig,
 )
 from pyphony.orchestrator import Orchestrator
-from pyphony.service import _run_service
+from pyphony.service import _run_service, _WorkflowContext, _ProcessorGeneration, _configs_differ
 from pyphony.tracker import LinearClient
 from pyphony.workspace import WorkspaceManager
 
 
-def _make_config(tmp_path) -> ServiceConfig:
-    return ServiceConfig(
+def _make_config(tmp_path, **overrides) -> ServiceConfig:
+    defaults = dict(
         tracker=TrackerConfig(
             kind="linear",
             api_key="key",
@@ -35,6 +36,8 @@ def _make_config(tmp_path) -> ServiceConfig:
         codex=CodexConfig(command="claude"),
         agent=AgentConfig(max_concurrent_agents=3),
     )
+    defaults.update(overrides)
+    return ServiceConfig(**defaults)
 
 
 def _make_issue(id="id-1", identifier="PROJ-1", state="In Progress") -> Issue:
@@ -231,3 +234,253 @@ class TestDrainCoordinator:
         # merge_trigger fires, but stop_event must NOT fire
         assert merge_trigger.is_set()
         assert not stop_event.is_set()
+
+
+class TestRollingReplacement:
+    """Tests for SER-56: rolling replacement of processors on config reload."""
+
+    def _make_ctx(self, tmp_path) -> _WorkflowContext:
+        """Create a _WorkflowContext with mock components."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        agent_runner = MagicMock()
+        agent_runner._prompt_template = "original prompt"
+        orch = Orchestrator(config, tracker, ws_mgr)
+        return _WorkflowContext(
+            workflow_path=tmp_path / "WORKFLOW.md",
+            orchestrator=orch,
+            tracker=tracker,
+            agent_runner=agent_runner,
+            workspace_mgr=ws_mgr,
+        )
+
+    def test_spawn_generation_creates_new_orchestrator(self, tmp_path):
+        """Spawning a new generation creates a fresh orchestrator and drains the old one."""
+        ctx = self._make_ctx(tmp_path)
+        old_orch = ctx.orchestrator
+        config = _make_config(tmp_path)
+
+        gen = ctx.spawn_generation(config, "new prompt")
+
+        assert len(ctx.generations) == 2
+        assert ctx.orchestrator is gen.orchestrator
+        assert ctx.orchestrator is not old_orch
+        assert old_orch._draining
+        assert old_orch._drain_kind == "reload"
+        assert gen.generation == 1
+
+    def test_spawn_multiple_generations(self, tmp_path):
+        """Multiple rapid config changes create multiple draining generations."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        gen1 = ctx.spawn_generation(config, "prompt v2")
+        gen2 = ctx.spawn_generation(config, "prompt v3")
+
+        assert len(ctx.generations) == 3
+        assert ctx.generations[0].orchestrator._draining
+        assert ctx.generations[1].orchestrator._draining
+        assert not ctx.generations[2].orchestrator._draining
+        assert ctx.orchestrator is gen2.orchestrator
+
+    def test_reap_drained_removes_finished_generations(self, tmp_path):
+        """Fully drained generations are removed by reap_drained()."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Spawn new gen — old one enters drain
+        ctx.spawn_generation(config, "new prompt")
+        old_orch = ctx.generations[0].orchestrator
+
+        # Old orchestrator has no running agents → is_fully_drained
+        assert old_orch.is_fully_drained
+
+        reaped = ctx.reap_drained()
+        assert len(reaped) == 1
+        assert reaped[0].orchestrator is old_orch
+        assert len(ctx.generations) == 1
+
+    def test_reap_does_not_remove_active_generation(self, tmp_path):
+        """The active (newest) generation is never reaped."""
+        ctx = self._make_ctx(tmp_path)
+        assert len(ctx.generations) == 1
+        reaped = ctx.reap_drained()
+        assert len(reaped) == 0
+        assert len(ctx.generations) == 1
+
+    def test_reap_keeps_generation_with_running_agents(self, tmp_path):
+        """Draining generations with running agents are not reaped."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Add running agent to current generation
+        issue = _make_issue()
+        ctx.orchestrator.state.running[issue.id] = _running_entry(issue)
+
+        # Spawn new gen — old one drains but has running agent
+        ctx.spawn_generation(config, "new prompt")
+        old_orch = ctx.generations[0].orchestrator
+        assert not old_orch.is_fully_drained
+
+        reaped = ctx.reap_drained()
+        assert len(reaped) == 0
+        assert len(ctx.generations) == 2
+
+    def test_draining_issue_ids_excludes_active(self, tmp_path):
+        """_draining_issue_ids returns IDs from draining gens only."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Add running agent to current generation
+        issue_old = _make_issue(id="old-1")
+        ctx.orchestrator.state.running[issue_old.id] = _running_entry(issue_old)
+
+        # Spawn new gen
+        ctx.spawn_generation(config, "new prompt")
+
+        # Add running agent to active (new) generation
+        issue_new = _make_issue(id="new-1")
+        ctx.orchestrator.state.running[issue_new.id] = _running_entry(issue_new)
+
+        draining_ids = ctx._draining_issue_ids()
+        assert "old-1" in draining_ids
+        assert "new-1" not in draining_ids
+
+    def test_peer_running_count_sums_draining(self, tmp_path):
+        """_peer_running_count returns sum of agents on draining orchestrators."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Add running agents to current generation
+        for i in range(2):
+            issue = _make_issue(id=f"old-{i}")
+            ctx.orchestrator.state.running[issue.id] = _running_entry(issue)
+
+        # Spawn new gen
+        ctx.spawn_generation(config, "new prompt")
+
+        assert ctx._peer_running_count() == 2
+
+    def test_new_orchestrator_excludes_draining_issues(self, tmp_path):
+        """New orchestrator skips issues handled by draining orchestrators."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Add running agent to current generation
+        issue = _make_issue(id="drain-1", state="Todo")
+        ctx.orchestrator.state.running[issue.id] = _running_entry(issue)
+
+        # Spawn new gen
+        ctx.spawn_generation(config, "new prompt")
+        new_orch = ctx.orchestrator
+
+        # New orchestrator should reject issue that's in drain
+        assert not new_orch._is_dispatch_eligible(issue)
+
+    def test_new_orchestrator_accepts_fresh_issues(self, tmp_path):
+        """New orchestrator accepts issues not handled by draining orchestrators."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        # Add a running agent to old gen
+        old_issue = _make_issue(id="drain-1", state="Todo")
+        ctx.orchestrator.state.running[old_issue.id] = _running_entry(old_issue)
+
+        # Spawn new gen
+        ctx.spawn_generation(config, "new prompt")
+        new_orch = ctx.orchestrator
+
+        # Fresh issue should be eligible
+        fresh_issue = _make_issue(id="fresh-1", state="Todo")
+        assert new_orch._is_dispatch_eligible(fresh_issue)
+
+    def test_available_slots_accounts_for_peer_running(self, tmp_path):
+        """New orchestrator counts draining agents against max_concurrent_agents."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3))
+
+        # Fill old gen with 2 running agents
+        for i in range(2):
+            issue = _make_issue(id=f"old-{i}", state="Todo")
+            ctx.orchestrator.state.running[issue.id] = _running_entry(issue)
+
+        # Spawn new gen
+        ctx.spawn_generation(config, "new prompt")
+        new_orch = ctx.orchestrator
+
+        # 3 max - 2 peer running = 1 available
+        assert new_orch._available_slots("Todo") == 1
+
+    def test_configs_differ_detects_change(self, tmp_path):
+        """_configs_differ returns True when configs differ."""
+        config_a = _make_config(tmp_path)
+        config_b = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=5))
+        assert _configs_differ(config_a, config_b)
+
+    def test_configs_differ_same_config(self, tmp_path):
+        """_configs_differ returns False for identical configs."""
+        config_a = _make_config(tmp_path)
+        config_b = _make_config(tmp_path)
+        assert not _configs_differ(config_a, config_b)
+
+    @pytest.mark.asyncio
+    async def test_drain_complete_event_fires_on_reload_drain(self, tmp_path):
+        """When an orchestrator is drained for reload, drain_complete_event fires."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        # Add a running agent
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        # Enter reload drain
+        orch._enter_drain_mode("test_reload", kind="reload")
+        assert orch._draining
+        assert orch._drain_kind == "reload"
+        assert not orch.drain_complete_event.is_set()
+
+        # Simulate agent completion
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="done")
+
+        # drain_complete_event should fire
+        assert orch.drain_complete_event.is_set()
+        # merge_detected should NOT fire (this is reload, not merge)
+        assert not orch.merge_detected
+
+    @pytest.mark.asyncio
+    async def test_reload_drain_does_not_trigger_merge(self, tmp_path):
+        """Reload drain with no running agents fires drain_complete but not merge."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+
+        orch = Orchestrator(config, tracker, ws_mgr)
+        merge_trigger = asyncio.Event()
+        orch.merge_detected_event = merge_trigger
+
+        orch._enter_drain_mode("test_reload", kind="reload")
+
+        assert orch.drain_complete_event.is_set()
+        assert not merge_trigger.is_set()
+        assert not orch.merge_detected
+
+    def test_all_orchestrators_includes_all_generations(self, tmp_path):
+        """all_orchestrators returns orchestrators from all generations."""
+        ctx = self._make_ctx(tmp_path)
+        config = _make_config(tmp_path)
+
+        first_orch = ctx.orchestrator
+        ctx.spawn_generation(config, "v2")
+        second_orch = ctx.orchestrator
+
+        all_orchs = ctx.all_orchestrators
+        assert len(all_orchs) == 2
+        assert first_orch in all_orchs
+        assert second_orch in all_orchs

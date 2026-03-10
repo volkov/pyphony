@@ -2026,9 +2026,14 @@ class TestGracefulDrain:
         orch = Orchestrator(config, tracker, ws_mgr)
         orch.exit_on_merge = True
         orch.merge_detected_event = asyncio.Event()
-        orch._draining = True
+        # Add a running agent so _enter_drain_mode doesn't fire immediately
+        issue = _make_issue(state="In Progress")
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch._enter_drain_mode("test")
+        # Now remove the agent to simulate completion
+        orch.state.running.clear()
 
-        # No running jobs
+        # No running jobs — poll_tick should signal
         stats = await orch.poll_tick()
 
         assert orch.merge_detected
