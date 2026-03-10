@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -12,6 +13,46 @@ def _config(tmp_path, **hook_kwargs) -> ServiceConfig:
         workspace=WorkspaceConfig(root=str(tmp_path)),
         hooks=HooksConfig(**hook_kwargs),
     )
+
+
+def _config_with_repo(tmp_path, repo_path, **hook_kwargs) -> ServiceConfig:
+    return ServiceConfig(
+        workspace=WorkspaceConfig(root=str(tmp_path), repo=str(repo_path)),
+        hooks=HooksConfig(**hook_kwargs),
+    )
+
+
+def _init_git_repo(path: Path) -> Path:
+    """Create a bare-minimum git repo with one commit."""
+    subprocess.run(["git", "init", str(path)], check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@test.com"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    (path / "README.md").write_text("init")
+    subprocess.run(
+        ["git", "add", "."], cwd=str(path), check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "initial"],
+        cwd=str(path),
+        check=True,
+        capture_output=True,
+    )
+    return path
+
+
+# ======================================================================
+# Existing tests (directory mode)
+# ======================================================================
 
 
 @pytest.mark.asyncio
@@ -147,3 +188,134 @@ async def test_cleanup_before_remove_failure_ignored(tmp_path):
 
     await mgr.cleanup_workspace("ISSUE-RMF")
     assert not Path(ws.path).exists()
+
+
+# ======================================================================
+# Worktree mode tests
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_worktree_create_new(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-41")
+
+    assert ws.created_now is True
+    assert Path(ws.path).is_dir()
+    assert ws.workspace_key == "SER-41"
+
+    # Branch should exist in source repo
+    result = subprocess.run(
+        ["git", "branch", "--list", "SER-41"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "SER-41" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_worktree_reuse_existing(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws1 = await mgr.create_or_reuse("SER-42")
+    ws2 = await mgr.create_or_reuse("SER-42")
+
+    assert ws1.created_now is True
+    assert ws2.created_now is False
+    assert ws1.path == ws2.path
+
+
+@pytest.mark.asyncio
+async def test_worktree_existing_branch(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    # Pre-create the branch in the repo
+    subprocess.run(
+        ["git", "branch", "SER-43"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-43")
+
+    assert ws.created_now is True
+    assert Path(ws.path).is_dir()
+
+
+@pytest.mark.asyncio
+async def test_worktree_cleanup(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-44")
+    assert Path(ws.path).is_dir()
+
+    await mgr.cleanup_workspace("SER-44")
+    assert not Path(ws.path).exists()
+
+    # Branch should still exist in source repo (not deleted)
+    result = subprocess.run(
+        ["git", "branch", "--list", "SER-44"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "SER-44" in result.stdout
+
+
+@pytest.mark.asyncio
+async def test_worktree_after_create_hook(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+    marker = tmp_path / "hook_ran"
+
+    mgr = WorkspaceManager(
+        _config_with_repo(workspaces, repo, after_create=f"touch {marker}")
+    )
+    ws = await mgr.create_or_reuse("SER-45")
+
+    assert ws.created_now is True
+    assert marker.exists()
+
+
+@pytest.mark.asyncio
+async def test_worktree_hook_failure_cleans_up(tmp_path):
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(
+        _config_with_repo(workspaces, repo, after_create="exit 1")
+    )
+
+    with pytest.raises(HookError):
+        await mgr.create_or_reuse("SER-46")
+
+    assert not (workspaces / "SER-46").exists()
+
+
+@pytest.mark.asyncio
+async def test_worktree_invalid_repo(tmp_path):
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+    fake_repo = tmp_path / "nonexistent"
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, fake_repo))
+
+    with pytest.raises(HookError, match="does not exist"):
+        await mgr.create_or_reuse("SER-47")
