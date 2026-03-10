@@ -17,7 +17,7 @@ from pyphony.models import (
     TrackerConfig,
     WorkspaceConfig,
 )
-from pyphony.orchestrator import Orchestrator, _build_transcript_url
+from pyphony.orchestrator import Orchestrator, _build_transcript_url, _build_transcript_comment
 from pyphony.tracker import LinearClient
 from pyphony.workspace import WorkspaceManager
 
@@ -693,6 +693,40 @@ class TestBuildTranscriptUrl:
 
     def test_empty_path(self):
         assert _build_transcript_url("http://localhost:3939", "") is None
+
+
+class TestBuildTranscriptComment:
+    def test_includes_transcript_link(self):
+        entry = _running_entry(_make_issue())
+        body = _build_transcript_comment(
+            "http://localhost:3939/#/session/proj/abc-123",
+            "/home/user/.claude/projects/proj/abc-123.jsonl",
+            entry,
+        )
+        assert "Agent started" in body
+        assert "[Transcript](http://localhost:3939/#/session/proj/abc-123)" in body
+
+    def test_includes_resume_instructions_when_workspace_set(self):
+        entry = _running_entry(_make_issue())
+        entry.attempt.workspace_path = "/home/user/my-project"
+        body = _build_transcript_comment(
+            "http://localhost:3939/#/session/proj/abc-123",
+            "/home/user/.claude/projects/proj/abc-123.jsonl",
+            entry,
+        )
+        assert "cd /home/user/my-project" in body
+        assert "claude --resume abc-123" in body
+
+    def test_no_resume_instructions_without_workspace(self):
+        entry = _running_entry(_make_issue())
+        entry.attempt.workspace_path = None
+        body = _build_transcript_comment(
+            "http://localhost:3939/#/session/proj/abc-123",
+            "/home/user/.claude/projects/proj/abc-123.jsonl",
+            entry,
+        )
+        assert "cd " not in body
+        assert "--resume" not in body
 
 
 class TestTranscriptCommentDuringRun:
