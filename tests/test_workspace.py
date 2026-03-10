@@ -319,3 +319,147 @@ async def test_worktree_invalid_repo(tmp_path):
 
     with pytest.raises(HookError, match="does not exist"):
         await mgr.create_or_reuse("SER-47")
+
+
+# ======================================================================
+# Rebase branch onto main tests
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_rebase_branch_onto_main_success(tmp_path):
+    """Rebase + ff-merge updates main and branch can be deleted."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-60")
+
+    # Create a commit on the branch inside the worktree
+    (Path(ws.path) / "feature.txt").write_text("hello")
+    subprocess.run(["git", "add", "."], cwd=ws.path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add feature"],
+        cwd=ws.path,
+        check=True,
+        capture_output=True,
+    )
+
+    result = await mgr.rebase_branch_onto_main("SER-60")
+    assert result is True
+
+    # Main should now contain the commit
+    log_out = subprocess.run(
+        ["git", "log", "--oneline", "main"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "add feature" in log_out.stdout
+
+    # Cleanup with branch deletion
+    await mgr.cleanup_workspace("SER-60", delete_branch=True)
+    assert not Path(ws.path).exists()
+
+    # Branch should be deleted
+    branches = subprocess.run(
+        ["git", "branch", "--list", "SER-60"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "SER-60" not in branches.stdout
+
+
+@pytest.mark.asyncio
+async def test_rebase_branch_onto_main_conflict(tmp_path):
+    """Rebase with conflicts logs warning and returns False."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-61")
+
+    # Create a conflicting commit on main
+    (repo / "conflict.txt").write_text("main version")
+    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "main conflict"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    # Create a conflicting commit on the branch
+    (Path(ws.path) / "conflict.txt").write_text("branch version")
+    subprocess.run(["git", "add", "."], cwd=ws.path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "branch conflict"],
+        cwd=ws.path,
+        check=True,
+        capture_output=True,
+    )
+
+    result = await mgr.rebase_branch_onto_main("SER-61")
+    assert result is False
+
+    # Branch should still exist untouched
+    branches = subprocess.run(
+        ["git", "branch", "--list", "SER-61"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "SER-61" in branches.stdout
+
+
+@pytest.mark.asyncio
+async def test_rebase_noop_when_no_repo(tmp_path):
+    """In directory mode (no repo), rebase is a no-op returning False."""
+    mgr = WorkspaceManager(_config(tmp_path))
+    result = await mgr.rebase_branch_onto_main("SER-62")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_rebase_missing_worktree(tmp_path):
+    """If worktree doesn't exist, rebase returns False."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    result = await mgr.rebase_branch_onto_main("SER-63")
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_cleanup_delete_branch(tmp_path):
+    """cleanup_workspace with delete_branch=True removes the branch."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.create_or_reuse("SER-64")
+
+    # Merge the branch into main first so -d succeeds
+    subprocess.run(
+        ["git", "merge", "--ff-only", "SER-64"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    await mgr.cleanup_workspace("SER-64", delete_branch=True)
+    assert not Path(ws.path).exists()
+
+    branches = subprocess.run(
+        ["git", "branch", "--list", "SER-64"],
+        cwd=str(repo),
+        capture_output=True,
+        text=True,
+    )
+    assert "SER-64" not in branches.stdout

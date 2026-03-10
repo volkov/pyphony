@@ -378,6 +378,27 @@ class Orchestrator:
                         error=str(exc),
                     )
 
+                # Rebase worktree branch onto main (linear history)
+                try:
+                    rebased = await self._workspace_mgr.rebase_branch_onto_main(
+                        entry.issue.identifier,
+                    )
+                    if rebased:
+                        log.info(
+                            "branch_rebased_onto_main",
+                            issue_identifier=entry.issue.identifier,
+                        )
+                        # Clean up worktree and delete the merged branch
+                        await self._workspace_mgr.cleanup_workspace(
+                            entry.issue.identifier, delete_branch=True,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "rebase_onto_main_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
             try:
                 await self._tracker.transition_issue(issue_id, target_state)
                 log.info(

@@ -210,10 +210,68 @@ class WorkspaceManager:
                 logger.warning("after_run hook failed (ignored): %s", exc)
 
     # ------------------------------------------------------------------
+    # rebase onto main
+    # ------------------------------------------------------------------
+
+    async def rebase_branch_onto_main(self, identifier: str) -> bool:
+        """Rebase the worktree branch onto main and fast-forward main.
+
+        Must be called *before* ``cleanup_workspace`` (the worktree must
+        still exist so that git can rebase in it).
+
+        Returns ``True`` if main was successfully updated, ``False``
+        otherwise (conflicts, missing worktree, directory mode, etc.).
+        """
+        if self._repo is None:
+            return False
+
+        workspace_key = sanitize_workspace_key(identifier)
+        workspace_path = (self._workspace_root / workspace_key).resolve()
+        branch_name = workspace_key
+
+        if not workspace_path.exists():
+            logger.warning(
+                "rebase_skipped: worktree %s does not exist", workspace_path
+            )
+            return False
+
+        # Step 1: Rebase the branch onto main inside the worktree.
+        try:
+            await self._run_git("rebase", "main", cwd=workspace_path)
+        except (HookError, HookTimeoutError) as exc:
+            logger.warning(
+                "rebase_failed: %s — leaving branch %s as-is", exc, branch_name
+            )
+            # Abort rebase if in-progress to leave worktree in a clean state.
+            try:
+                await self._run_git("rebase", "--abort", cwd=workspace_path)
+            except Exception:
+                pass
+            return False
+
+        # Step 2: Fast-forward main to the rebased branch tip.
+        try:
+            await self._run_git(
+                "merge", "--ff-only", branch_name, cwd=self._repo
+            )
+        except (HookError, HookTimeoutError) as exc:
+            logger.warning(
+                "ff_merge_failed: %s — branch %s rebased but main not updated",
+                exc,
+                branch_name,
+            )
+            return False
+
+        logger.info("branch %s rebased and merged into main", branch_name)
+        return True
+
+    # ------------------------------------------------------------------
     # cleanup
     # ------------------------------------------------------------------
 
-    async def cleanup_workspace(self, identifier: str) -> None:
+    async def cleanup_workspace(
+        self, identifier: str, *, delete_branch: bool = False
+    ) -> None:
         workspace_key = sanitize_workspace_key(identifier)
         workspace_path = (self._workspace_root / workspace_key).resolve()
 
@@ -242,6 +300,18 @@ class WorkspaceManager:
                 )
             except Exception as exc:
                 logger.warning("git worktree remove failed (ignored): %s", exc)
+
+            if delete_branch:
+                branch_name = workspace_key
+                try:
+                    await self._run_git(
+                        "branch", "-d", branch_name, cwd=self._repo
+                    )
+                    logger.info("deleted branch %s", branch_name)
+                except Exception as exc:
+                    logger.warning(
+                        "branch delete failed (ignored): %s", exc
+                    )
             return
 
         # ---- default mode ----
