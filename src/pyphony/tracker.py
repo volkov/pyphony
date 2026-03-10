@@ -23,12 +23,15 @@ from .tracker_queries import (
     ISSUE_BY_IDENTIFIER_QUERY,
     ISSUE_COMMENTS_QUERY,
     ISSUE_CREATE_MUTATION,
+    ISSUE_LABEL_CREATE_MUTATION,
+    ISSUE_LABEL_IDS_QUERY,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
     ISSUE_UPDATE_MUTATION,
     ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
     PROJECT_TEAMS_QUERY,
+    TEAM_LABELS_QUERY,
     WORKFLOW_STATES_QUERY,
 )
 
@@ -203,6 +206,81 @@ class LinearClient:
                 "user": (node.get("user") or {}).get("name", ""),
             })
         return comments
+
+    async def replace_issue_labels(
+        self,
+        issue_id: str,
+        remove_labels: list[str],
+        add_labels: list[str],
+    ) -> bool:
+        """Remove *remove_labels* and add *add_labels* on an issue (case-insensitive).
+
+        Creates any *add_labels* that don't exist yet.  Returns True on success.
+        """
+        # 1. Fetch current label IDs on the issue
+        data = await self._execute(ISSUE_LABEL_IDS_QUERY, {"issueId": issue_id})
+        issue_node = data.get("issue")
+        if not issue_node:
+            log.warning("replace_labels_issue_not_found", issue_id=issue_id)
+            return False
+
+        current_labels: dict[str, str] = {}  # lowercase name → id
+        for node in (issue_node.get("labels") or {}).get("nodes", []):
+            current_labels[node["name"].lower()] = node["id"]
+
+        # 2. Resolve team for label lookup / creation
+        team_data = await self._execute(ISSUE_TEAM_QUERY, {"issueId": issue_id})
+        team = (team_data.get("issue") or {}).get("team")
+        if not team or not team.get("id"):
+            log.warning("replace_labels_team_not_found", issue_id=issue_id)
+            return False
+        team_id = team["id"]
+
+        # 3. Fetch all team labels so we can find IDs for add_labels
+        team_labels_data = await self._execute(
+            TEAM_LABELS_QUERY, {"teamId": team_id}
+        )
+        team_labels: dict[str, str] = {}  # lowercase name → id
+        for node in (team_labels_data.get("issueLabels") or {}).get("nodes", []):
+            team_labels[node["name"].lower()] = node["id"]
+
+        # 4. Compute new label ID set
+        remove_lower = {r.lower() for r in remove_labels}
+        new_label_ids = [
+            lid for lname, lid in current_labels.items()
+            if lname not in remove_lower
+        ]
+
+        # 5. Resolve or create add_labels
+        for label_name in add_labels:
+            lower = label_name.lower()
+            if lower in {lname for lname in current_labels if lname not in remove_lower}:
+                continue  # already on the issue
+            label_id = team_labels.get(lower)
+            if not label_id:
+                # Create the label
+                create_data = await self._execute(
+                    ISSUE_LABEL_CREATE_MUTATION,
+                    {"teamId": team_id, "name": label_name},
+                )
+                created = (create_data.get("issueLabelCreate") or {}).get("issueLabel")
+                if created:
+                    label_id = created["id"]
+                else:
+                    log.warning(
+                        "label_create_failed",
+                        label_name=label_name,
+                        issue_id=issue_id,
+                    )
+                    continue
+            new_label_ids.append(label_id)
+
+        # 6. Update issue with new label set
+        data = await self._execute(
+            ISSUE_UPDATE_MUTATION,
+            {"issueId": issue_id, "input": {"labelIds": new_label_ids}},
+        )
+        return data.get("issueUpdate", {}).get("success", False)
 
     async def comment_on_issue(self, issue_id: str, body: str) -> bool:
         """Post a comment on an issue. Returns True on success."""

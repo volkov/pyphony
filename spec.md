@@ -78,6 +78,7 @@ pyphony-sv WORKFLOW.md               # Supervisor: рестарт при merge
 
 - **HTTP Server** (опционально, `--port` или `server.port`) — dashboard, REST API для статуса и метрик
 - **Supervisor** (`pyphony-sv`) — перезапускает сервис при merge/завершении
+- **Plan Required** — тикеты с лейблом «plan required» обрабатываются в режиме планирования: агент получает read-only инструменты (permission_mode: plan), исследует кодовую базу и выдаёт план реализации; по завершении лейбл заменяется на «with plan» и задача переходит в Backlog
 - **Automerge** — автоматически мержит PR по лейблам
 - **File Watcher** — отслеживает изменения WORKFLOW.md для hot-reload
 

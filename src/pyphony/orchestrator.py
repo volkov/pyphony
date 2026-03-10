@@ -316,11 +316,31 @@ class Orchestrator:
 
         # Transition issue based on completion and review requirements
         if normal and result and "[DONE]" in result:
-            review_required = "review required" in [
-                label.lower() for label in entry.issue.labels
-            ]
+            issue_labels_lower = [label.lower() for label in entry.issue.labels]
+            review_required = "review required" in issue_labels_lower
+            plan_required = "plan required" in issue_labels_lower
 
-            if review_required:
+            if plan_required:
+                # Plan is complete — swap labels and move to Backlog
+                try:
+                    await self._tracker.replace_issue_labels(
+                        issue_id,
+                        remove_labels=["plan required"],
+                        add_labels=["with plan"],
+                    )
+                    log.info(
+                        "plan_labels_swapped",
+                        issue_identifier=entry.issue.identifier,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "plan_label_swap_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
+                target_state = "Backlog"
+            elif review_required:
                 # Review is needed — move to "In Review" instead of "Done"
                 target_state = "In Review"
             else:

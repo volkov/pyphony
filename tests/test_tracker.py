@@ -645,6 +645,162 @@ class TestGetIssue:
                 await client.close()
 
 
+class TestReplaceIssueLabels:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_removes_and_adds_labels(self):
+        """Removes 'plan required' and adds 'with plan' label."""
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # 1. Fetch issue label IDs
+                httpx.Response(200, json={
+                    "data": {
+                        "issue": {
+                            "labels": {
+                                "nodes": [
+                                    {"id": "label-plan-req", "name": "Plan Required"},
+                                    {"id": "label-backend", "name": "Backend"},
+                                ]
+                            }
+                        }
+                    }
+                }),
+                # 2. Fetch issue team
+                _issue_team_response(),
+                # 3. Fetch team labels
+                httpx.Response(200, json={
+                    "data": {
+                        "issueLabels": {
+                            "nodes": [
+                                {"id": "label-plan-req", "name": "Plan Required"},
+                                {"id": "label-backend", "name": "Backend"},
+                                {"id": "label-with-plan", "name": "with plan"},
+                            ]
+                        }
+                    }
+                }),
+                # 4. Update issue labels
+                httpx.Response(200, json={
+                    "data": {
+                        "issueUpdate": {
+                            "success": True,
+                            "issue": {
+                                "id": "issue-1",
+                                "identifier": "SER-1",
+                                "title": "Test",
+                                "description": None,
+                                "state": {"name": "Todo"},
+                                "url": "https://linear.app/issue/SER-1",
+                            },
+                        }
+                    }
+                }),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.replace_issue_labels(
+                "issue-1",
+                remove_labels=["plan required"],
+                add_labels=["with plan"],
+            )
+        finally:
+            await client.close()
+
+        assert result is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_creates_missing_label(self):
+        """Creates a label that doesn't exist yet."""
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # 1. Fetch issue label IDs
+                httpx.Response(200, json={
+                    "data": {
+                        "issue": {
+                            "labels": {
+                                "nodes": [
+                                    {"id": "label-plan-req", "name": "Plan Required"},
+                                ]
+                            }
+                        }
+                    }
+                }),
+                # 2. Fetch issue team
+                _issue_team_response(),
+                # 3. Fetch team labels (no "with plan" label)
+                httpx.Response(200, json={
+                    "data": {
+                        "issueLabels": {
+                            "nodes": [
+                                {"id": "label-plan-req", "name": "Plan Required"},
+                            ]
+                        }
+                    }
+                }),
+                # 4. Create "with plan" label
+                httpx.Response(200, json={
+                    "data": {
+                        "issueLabelCreate": {
+                            "success": True,
+                            "issueLabel": {"id": "label-new", "name": "with plan"},
+                        }
+                    }
+                }),
+                # 5. Update issue labels
+                httpx.Response(200, json={
+                    "data": {
+                        "issueUpdate": {
+                            "success": True,
+                            "issue": {
+                                "id": "issue-1",
+                                "identifier": "SER-1",
+                                "title": "Test",
+                                "description": None,
+                                "state": {"name": "Todo"},
+                                "url": "https://linear.app/issue/SER-1",
+                            },
+                        }
+                    }
+                }),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.replace_issue_labels(
+                "issue-1",
+                remove_labels=["plan required"],
+                add_labels=["with plan"],
+            )
+        finally:
+            await client.close()
+
+        assert result is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_issue_not_found_returns_false(self):
+        """Returns False when issue is not found."""
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(200, json={
+                "data": {"issue": None}
+            })
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.replace_issue_labels(
+                "nonexistent", remove_labels=["x"], add_labels=["y"]
+            )
+        finally:
+            await client.close()
+
+        assert result is False
+
+
 class TestUpdateIssue:
     @respx.mock
     @pytest.mark.asyncio

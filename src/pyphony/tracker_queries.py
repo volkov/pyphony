@@ -188,6 +188,33 @@ query IssueComments($issueId: String!) {
 }
 """
 
+ISSUE_LABEL_IDS_QUERY = """
+query IssueLabelIds($issueId: String!) {
+  issue(id: $issueId) {
+    labels {
+      nodes { id name }
+    }
+  }
+}
+"""
+
+TEAM_LABELS_QUERY = """
+query TeamLabels($teamId: ID!) {
+  issueLabels(filter: { team: { id: { eq: $teamId } } }, first: 250) {
+    nodes { id name }
+  }
+}
+"""
+
+ISSUE_LABEL_CREATE_MUTATION = """
+mutation IssueLabelCreate($teamId: String!, $name: String!) {
+  issueLabelCreate(input: { teamId: $teamId, name: $name }) {
+    success
+    issueLabel { id name }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(
