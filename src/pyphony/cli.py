@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue"}
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -54,6 +54,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     update_parser.add_argument("--description", default=None, help="New issue description (markdown)")
     update_parser.add_argument("--state", default=None, help="New issue state (e.g. 'In Progress', 'Done')")
     _add_common_args(update_parser)
+
+    # Prompt view
+    prompt_view_parser = subparsers.add_parser(
+        "prompt-view", help="Show the rendered prompt for a given issue"
+    )
+    prompt_view_parser.add_argument("issue_identifier", help="Issue identifier (e.g. SER-42)")
+    _add_common_args(prompt_view_parser)
 
     # Backward compat: if first arg is not a known subcommand, insert "run"
     # so that e.g. `pyphony my_workflow.md` or `pyphony --port 8080` works
@@ -124,6 +131,9 @@ def main() -> None:
     elif args.command == "update-issue":
         from .issue_commands import update_issue
         update_issue(args)
+    elif args.command == "prompt-view":
+        from .prompt_view import prompt_view
+        prompt_view(args)
     else:
         from .service import run_service
         run_service(args)

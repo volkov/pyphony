@@ -155,6 +155,36 @@ query IssueByIdentifier($filter: IssueFilter!, $first: Int!) {
 }
 """
 
+ISSUE_FULL_BY_IDENTIFIER_QUERY = """
+query IssueFullByIdentifier($filter: IssueFilter!, $first: Int!) {
+  issues(filter: $filter, first: $first) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      labels { nodes { name } }
+      relations(first: 100) {
+        nodes {
+          type
+          relatedIssue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+  }
+}
+"""
+
 ISSUE_UPDATE_MUTATION = """
 mutation IssueUpdate($issueId: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $issueId, input: $input) {
