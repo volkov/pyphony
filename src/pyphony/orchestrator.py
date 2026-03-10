@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 
 import structlog
 
+from .automerge import try_automerge_pr
+
 from .config import service_config_from_workflow, validate_dispatch_config
 from .models import (
     AgentTotals,
@@ -249,14 +251,41 @@ class Orchestrator:
                     error=str(exc),
                 )
 
-        # Transition issue to Done if agent signaled completion
+        # Transition issue based on completion and review requirements
         if normal and result and "[DONE]" in result:
+            review_required = "review required" in [
+                label.lower() for label in entry.issue.labels
+            ]
+
+            if review_required:
+                # Review is needed — move to "In Review" instead of "Done"
+                target_state = "In Review"
+            else:
+                # No review required — try to automerge any attached PRs first
+                target_state = "Done"
+                try:
+                    pr_urls = await self._tracker.fetch_issue_pr_urls(issue_id)
+                    for pr_url in pr_urls:
+                        merged = await try_automerge_pr(pr_url)
+                        log.info(
+                            "automerge_attempt",
+                            issue_identifier=entry.issue.identifier,
+                            pr_url=pr_url,
+                            merged=merged,
+                        )
+                except Exception as exc:
+                    log.warning(
+                        "automerge_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
             try:
-                await self._tracker.transition_issue(issue_id, "Done")
+                await self._tracker.transition_issue(issue_id, target_state)
                 log.info(
                     "issue_transitioned",
                     issue_identifier=entry.issue.identifier,
-                    target_state="Done",
+                    target_state=target_state,
                 )
             except Exception as exc:
                 log.warning(
@@ -265,7 +294,7 @@ class Orchestrator:
                     error=str(exc),
                 )
 
-            if self.exit_on_merge:
+            if self.exit_on_merge and target_state == "Done":
                 log.info(
                     "exit_on_merge_triggered",
                     issue_identifier=entry.issue.identifier,

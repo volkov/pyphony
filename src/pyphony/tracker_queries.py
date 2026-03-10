@@ -98,6 +98,20 @@ mutation CommentCreate($issueId: String!, $body: String!) {
 }
 """
 
+ISSUE_ATTACHMENTS_QUERY = """
+query IssueAttachments($issueId: String!) {
+  issue(id: $issueId) {
+    attachments {
+      nodes {
+        url
+        title
+        sourceType
+      }
+    }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(
