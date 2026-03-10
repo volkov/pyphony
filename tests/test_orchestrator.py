@@ -1509,6 +1509,98 @@ class TestPlanRequired:
             mock_transition.assert_called_once_with(issue.id, "Backlog")
 
 
+class TestPlanTextPosted:
+    """Tests that full plan_text is posted to Linear instead of short result."""
+
+    @pytest.mark.asyncio
+    async def test_plan_text_posted_instead_of_result(self, tmp_path):
+        """When plan_text is set, it should be posted as the comment body."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        entry = _running_entry(issue)
+        entry.attempt.plan_text = "## Detailed Plan\n\n1. Step one\n2. Step two\n3. Step three"
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Short summary [DONE]")
+
+        assert len(posted_bodies) == 1
+        assert posted_bodies[0] == "## Detailed Plan\n\n1. Step one\n2. Step two\n3. Step three"
+
+    @pytest.mark.asyncio
+    async def test_result_used_when_no_plan_text(self, tmp_path):
+        """When plan_text is not set, the result should be posted as before."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        entry = _running_entry(issue)
+        # plan_text is None by default
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Short summary [DONE]")
+
+        assert len(posted_bodies) == 1
+        assert posted_bodies[0] == "Short summary [DONE]"
+
+    @pytest.mark.asyncio
+    async def test_plan_text_not_used_for_non_plan_issues(self, tmp_path):
+        """For non-plan-required issues, plan_text should be ignored."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []  # no plan required label
+        entry = _running_entry(issue)
+        entry.attempt.plan_text = "## Some plan"
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Done [DONE]")
+
+        assert len(posted_bodies) == 1
+        assert posted_bodies[0] == "Done [DONE]"
+
+
 class TestResolveConflict:
     """Tests for the 'resolve-conflict' label flow."""
 
