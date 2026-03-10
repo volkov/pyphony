@@ -115,10 +115,39 @@ async def _run_service(args: argparse.Namespace) -> None:
 
     exit_on_merge = getattr(args, "exit_on_merge", False)
     if exit_on_merge:
+        # Use a separate event so that a single orchestrator's drain completion
+        # does NOT immediately stop the whole service.  The drain coordinator
+        # below will wait for ALL orchestrators to finish before setting
+        # stop_event.
+        merge_trigger = asyncio.Event()
         for ctx in contexts:
             ctx.orchestrator.exit_on_merge = True
-            ctx.orchestrator.merge_detected_event = stop_event
+            ctx.orchestrator.merge_detected_event = merge_trigger
         log.info("exit_on_merge_enabled")
+
+        async def _drain_coordinator() -> None:
+            """Wait for any orchestrator to signal merge, drain all, then stop."""
+            await merge_trigger.wait()
+            log.info("drain_coordinator_triggered")
+
+            # Put every orchestrator into drain mode so none dispatch new work.
+            for ctx in contexts:
+                ctx.orchestrator._enter_drain_mode("exit_on_merge_coordination")
+
+            # Wait until every orchestrator has zero running agents.
+            while True:
+                total_running = sum(
+                    len(ctx.orchestrator.state.running) for ctx in contexts
+                )
+                if total_running == 0:
+                    break
+                log.info("drain_coordinator_waiting", total_running=total_running)
+                await asyncio.sleep(2)
+
+            log.info("drain_coordinator_complete")
+            stop_event.set()
+
+        asyncio.create_task(_drain_coordinator())
 
     # Start HTTP server if port is configured
     server_started = False
