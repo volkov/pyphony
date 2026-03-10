@@ -42,6 +42,9 @@ class Orchestrator:
             poll_interval_ms=config.polling.interval_ms,
             max_concurrent_agents=config.agent.max_concurrent_agents,
         )
+        self.exit_on_merge: bool = False
+        self.merge_detected: bool = False
+        self.merge_detected_event: asyncio.Event | None = None
 
     @property
     def state(self) -> OrchestratorRuntimeState:
@@ -261,6 +264,15 @@ class Orchestrator:
                     issue_identifier=entry.issue.identifier,
                     error=str(exc),
                 )
+
+            if self.exit_on_merge:
+                log.info(
+                    "exit_on_merge_triggered",
+                    issue_identifier=entry.issue.identifier,
+                )
+                self.merge_detected = True
+                if self.merge_detected_event:
+                    self.merge_detected_event.set()
 
         current_attempt = entry.attempt.attempt or 0
         max_runs = self._config.agent.max_runs
