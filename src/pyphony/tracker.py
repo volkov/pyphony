@@ -18,6 +18,7 @@ import structlog
 
 from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
+    COMMENT_CREATE_MUTATION,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
     ISSUE_UPDATE_STATE_MUTATION,
@@ -160,6 +161,14 @@ class LinearClient:
         )
         success = data.get("issueUpdate", {}).get("success", False)
         return success
+
+    async def comment_on_issue(self, issue_id: str, body: str) -> bool:
+        """Post a comment on an issue. Returns True on success."""
+        data = await self._execute(
+            COMMENT_CREATE_MUTATION,
+            {"issueId": issue_id, "body": body},
+        )
+        return data.get("commentCreate", {}).get("success", False)
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
