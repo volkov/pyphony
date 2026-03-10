@@ -14,6 +14,7 @@ from claude_agent_sdk import (
     CLINotFoundError,
     ProcessError,
     ResultMessage,
+    SystemMessage,
     query,
 )
 
@@ -28,7 +29,7 @@ from pyphony.prompt import render_prompt
 from pyphony.workspace import WorkspaceManager
 
 # Type alias to avoid circular import with LinearClient
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Awaitable, Callable
 if TYPE_CHECKING:
     from pyphony.tracker import LinearClient
 
@@ -62,6 +63,7 @@ class AgentRunner:
         issue: Issue,
         attempt: int | None = None,
         on_event: object | None = None,
+        on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
     ) -> RunAttempt:
         """Run an agent session for one issue."""
         run_attempt = RunAttempt(
@@ -144,15 +146,36 @@ class AgentRunner:
                 # 6. Run query
                 # Remove CLAUDECODE to allow launching from within a Claude Code session
                 os.environ.pop("CLAUDECODE", None)
+                transcript_notified = False
                 async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
                     async for message in query(
                         prompt=prompt,
                         options=options,
                     ):
+                        # Try to extract session_id from any message as
+                        # early as possible so the transcript link can be
+                        # posted while the agent is still running.
+                        if not transcript_notified and on_transcript:
+                            sid = getattr(message, "session_id", None)
+                            if not sid and isinstance(message, SystemMessage):
+                                sid = message.data.get("session_id")
+                            if sid:
+                                tp = _transcript_path(workspace.path, sid)
+                                run_attempt.transcript_path = tp
+                                transcript_notified = True
+                                try:
+                                    await on_transcript(tp)
+                                except Exception:
+                                    log.warning(
+                                        "on_transcript_callback_failed",
+                                        issue_identifier=issue.identifier,
+                                    )
+
                         if isinstance(message, ResultMessage):
-                            run_attempt.transcript_path = _transcript_path(
-                                workspace.path, message.session_id
-                            )
+                            if not run_attempt.transcript_path:
+                                run_attempt.transcript_path = _transcript_path(
+                                    workspace.path, message.session_id
+                                )
                             run_attempt.result = message.result
                             if message.is_error:
                                 run_attempt.status = "failed"

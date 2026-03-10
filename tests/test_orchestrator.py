@@ -628,35 +628,8 @@ class TestCommentOnExit:
         assert call_order == ["comment", "transition"]
 
     @pytest.mark.asyncio
-    async def test_comment_includes_transcript_link(self, tmp_path):
-        """Comment body includes a transcript viewer link when transcript_path is provided."""
-        config = _make_config(tmp_path)
-        tracker = LinearClient(config)
-        ws_mgr = WorkspaceManager(config)
-        orch = Orchestrator(config, tracker, ws_mgr)
-
-        issue = _make_issue()
-        orch.state.running[issue.id] = _running_entry(issue)
-        orch.state.claimed.add(issue.id)
-
-        transcript_path = "/home/user/.claude/projects/-Users-user-my-project/abc-123.jsonl"
-
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
-            await orch._on_worker_exit(
-                issue.id, normal=True, error=None,
-                result="Here is my summary",
-                transcript_path=transcript_path,
-            )
-            expected_body = (
-                "Here is my summary"
-                "\n\n---\n"
-                "[Transcript](http://localhost:3939/#/session/-Users-user-my-project/abc-123)"
-            )
-            mock_comment.assert_called_once_with(issue.id, expected_body)
-
-    @pytest.mark.asyncio
-    async def test_comment_no_transcript_link_without_path(self, tmp_path):
-        """Comment body has no transcript link when transcript_path is None."""
+    async def test_result_comment_does_not_include_transcript_link(self, tmp_path):
+        """Result comment should not include transcript link (posted separately)."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -670,7 +643,6 @@ class TestCommentOnExit:
             await orch._on_worker_exit(
                 issue.id, normal=True, error=None,
                 result="Here is my summary",
-                transcript_path=None,
             )
             mock_comment.assert_called_once_with(issue.id, "Here is my summary")
 
@@ -695,6 +667,92 @@ class TestBuildTranscriptUrl:
 
     def test_empty_path(self):
         assert _build_transcript_url("http://localhost:3939", "") is None
+
+
+class TestTranscriptCommentDuringRun:
+    @pytest.mark.asyncio
+    async def test_transcript_link_posted_via_on_transcript_callback(self, tmp_path):
+        """_run_worker passes on_transcript callback that posts transcript link."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        transcript_path = "/home/user/.claude/projects/-Users-user-my-project/abc-123.jsonl"
+
+        # Fake agent function that calls on_transcript callback
+        async def fake_agent_fn(issue, attempt, on_transcript=None):
+            if on_transcript:
+                await on_transcript(transcript_path)
+            return RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                status="completed",
+                result="Done [DONE]",
+                transcript_path=transcript_path,
+            )
+
+        orch._run_agent_fn = fake_agent_fn
+        entry = _running_entry(issue)
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._run_worker(issue, entry)
+
+            # First call: transcript link comment (posted during agent run)
+            # Second call: result comment (posted on exit)
+            assert mock_comment.call_count == 2
+            transcript_call = mock_comment.call_args_list[0]
+            assert transcript_call[0][0] == issue.id
+            assert "[Transcript](" in transcript_call[0][1]
+            assert "abc-123" in transcript_call[0][1]
+
+            result_call = mock_comment.call_args_list[1]
+            assert result_call[0][1] == "Done [DONE]"
+
+    @pytest.mark.asyncio
+    async def test_transcript_comment_failure_does_not_break_agent(self, tmp_path):
+        """If transcript comment fails, agent continues normally."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        callback_called = False
+
+        async def fake_agent_fn(issue, attempt, on_transcript=None):
+            nonlocal callback_called
+            if on_transcript:
+                await on_transcript("/some/path/proj/sess.jsonl")
+                callback_called = True
+            return RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                status="completed",
+                result="All done [DONE]",
+            )
+
+        orch._run_agent_fn = fake_agent_fn
+        entry = _running_entry(issue)
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        call_count = 0
+        async def comment_side_effect(issue_id, body):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("API error")
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=comment_side_effect):
+            await orch._run_worker(issue, entry)
+
+        assert callback_called
+        assert call_count == 2  # transcript (failed) + result
 
 
 class TestReconciliation:
