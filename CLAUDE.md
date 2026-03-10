@@ -1,6 +1,13 @@
 # Pyphony
 
-Python implementation of the Symphony Service Specification (SPEC.md).
+Python implementation of the Symphony Service Specification.
+
+## Спецификации
+
+- `spec.md` — краткий обзор системы (макс 2 страницы), ссылается на детальные спеки
+- `specs/symphony.md` — полная language-agnostic спецификация Symphony
+
+**Важно:** при изменении функциональности обновляй соответствующие спецификации. Если добавляешь новую подсистему — добавь спеку в `specs/` и ссылку в `spec.md`. Используй `/write-spec` для создания и обновления спек.
 
 ## Stack
 
