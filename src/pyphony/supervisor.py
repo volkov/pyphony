@@ -148,12 +148,14 @@ def main() -> None:
     signal.signal(signal.SIGTERM, _handle_signal)
 
     # Resolve workflow files: explicit args or auto-discover from workflows/
-    workflow_files = args.workflow_files
-    if not workflow_files:
+    explicit_files = args.workflow_files
+    if not explicit_files:
         workflow_files = _discover_workflows(DEFAULT_WORKFLOWS_DIR)
         if not workflow_files:
             print("[pyphony-sv] no workflows to run, exiting")
             return
+    else:
+        workflow_files = explicit_files
 
     print(f"[pyphony-sv] supervisor started (workflows={workflow_files})")
 
@@ -165,10 +167,22 @@ def main() -> None:
         if not _running:
             break
 
-        # Step 2: start a single process with all workflow files
+        # Step 2: re-discover workflows after pull (picks up new files from PRs)
+        if not explicit_files:
+            workflow_files = _discover_workflows(DEFAULT_WORKFLOWS_DIR)
+            if not workflow_files:
+                print("[pyphony-sv] no workflows found after pull, retrying in 5s...")
+                for _ in range(50):
+                    if not _running:
+                        break
+                    time.sleep(0.1)
+                continue
+            print(f"[pyphony-sv] discovered workflows: {workflow_files}")
+
+        # Step 3: start a single process with all workflow files
         proc = _run_app(workflow_files, extra)
 
-        # Step 3: wait for the process to exit
+        # Step 4: wait for the process to exit
         while _running:
             ret = proc.poll()
             if ret is not None:
