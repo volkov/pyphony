@@ -84,6 +84,7 @@ class CodexConfig(BaseModel):
 
 class ServerConfig(BaseModel):
     port: int | None = None
+    explorer_base_url: str = "http://localhost:3939"
 
 
 class ServiceConfig(BaseModel):

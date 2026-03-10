@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from datetime import datetime, timezone
 
@@ -26,6 +27,24 @@ from .workspace import WorkspaceManager
 _IN_PROGRESS_STATE = "In Progress"
 
 log = structlog.stdlib.get_logger()
+
+
+def _build_transcript_url(base_url: str, transcript_path: str) -> str | None:
+    """Build a claude-explorer URL from a transcript file path.
+
+    transcript_path looks like:
+      ~/.claude/projects/-Users-serg-v-symphony-workspaces-SER-31/5c0faff4-....jsonl
+
+    Returns URL like:
+      http://localhost:3939/#/session/-Users-serg-v-symphony-workspaces-SER-31/5c0faff4-...
+    """
+    if not transcript_path:
+        return None
+    project_dir = os.path.basename(os.path.dirname(transcript_path))
+    session_id = os.path.splitext(os.path.basename(transcript_path))[0]
+    if not project_dir or not session_id:
+        return None
+    return f"{base_url.rstrip('/')}/#/session/{project_dir}/{session_id}"
 
 
 class Orchestrator:
@@ -182,6 +201,7 @@ class Orchestrator:
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
         try:
             result = await self._run_agent_fn(issue, entry.attempt.attempt)
+            transcript_path = getattr(result, "transcript_path", None)
             if hasattr(result, "status") and result.status == "failed":
                 log.error(
                     "worker_failed",
@@ -191,11 +211,13 @@ class Orchestrator:
                 await self._on_worker_exit(
                     issue.id, normal=False, error=getattr(result, "error", "agent_failed"),
                     result=getattr(result, "result", None),
+                    transcript_path=transcript_path,
                 )
             else:
                 await self._on_worker_exit(
                     issue.id, normal=True, error=None,
                     result=getattr(result, "result", None),
+                    transcript_path=transcript_path,
                 )
         except Exception as exc:
             log.error(
@@ -211,6 +233,7 @@ class Orchestrator:
         normal: bool,
         error: str | None,
         result: str | None = None,
+        transcript_path: str | None = None,
     ) -> None:
         entry = self._state.running.pop(issue_id, None)
         if entry is None:
@@ -238,11 +261,18 @@ class Orchestrator:
 
         # Post agent's last message as a comment on the issue
         if result:
+            comment_body = result
+            transcript_url = _build_transcript_url(
+                self._config.server.explorer_base_url, transcript_path
+            )
+            if transcript_url:
+                comment_body += f"\n\n---\n[Transcript]({transcript_url})"
             try:
-                await self._tracker.comment_on_issue(issue_id, result)
+                await self._tracker.comment_on_issue(issue_id, comment_body)
                 log.info(
                     "comment_posted",
                     issue_identifier=entry.issue.identifier,
+                    transcript_url=transcript_url,
                 )
             except Exception as exc:
                 log.warning(
