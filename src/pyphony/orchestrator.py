@@ -139,10 +139,9 @@ class Orchestrator:
         if issue.id in self._state.claimed:
             return False
 
-        if issue_state == "todo":
-            for blocker in issue.blocked_by:
-                if blocker.state and normalize_state(blocker.state) not in terminal:
-                    return False
+        for blocker in issue.blocked_by:
+            if blocker.state and normalize_state(blocker.state) not in terminal:
+                return False
 
         return True
 
@@ -497,7 +496,12 @@ class Orchestrator:
         active = {normalize_state(s) for s in self._config.tracker.active_states}
         terminal = {normalize_state(s) for s in self._config.tracker.terminal_states}
         issue_state = normalize_state(issue.state)
-        return issue_state in active and issue_state not in terminal
+        if issue_state not in active or issue_state in terminal:
+            return False
+        for blocker in issue.blocked_by:
+            if blocker.state and normalize_state(blocker.state) not in terminal:
+                return False
+        return True
 
     def _release_claim(self, issue_id: str) -> None:
         self._state.claimed.discard(issue_id)

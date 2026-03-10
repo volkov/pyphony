@@ -169,6 +169,30 @@ class TestDispatchEligibility:
         )
         assert orch._is_dispatch_eligible(issue)
 
+    def test_in_progress_with_nonterminal_blocker_not_eligible(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(
+            state="In Progress",
+            blocked_by=[BlockerRef(id="b1", state="Todo")],
+        )
+        assert not orch._is_dispatch_eligible(issue)
+
+    def test_in_progress_with_terminal_blocker_eligible(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(
+            state="In Progress",
+            blocked_by=[BlockerRef(id="b1", state="Done")],
+        )
+        assert orch._is_dispatch_eligible(issue)
+
 
 class TestConcurrency:
     def test_global_concurrency_limit(self, tmp_path):
