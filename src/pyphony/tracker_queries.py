@@ -140,6 +140,37 @@ mutation IssueCreate($teamId: String!, $title: String!, $description: String, $s
 }
 """
 
+ISSUE_BY_IDENTIFIER_QUERY = """
+query IssueByIdentifier($filter: IssueFilter!, $first: Int!) {
+  issues(filter: $filter, first: $first) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      state { name }
+      url
+    }
+  }
+}
+"""
+
+ISSUE_UPDATE_MUTATION = """
+mutation IssueUpdate($issueId: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $issueId, input: $input) {
+    success
+    issue {
+      id
+      identifier
+      title
+      description
+      state { name }
+      url
+    }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(

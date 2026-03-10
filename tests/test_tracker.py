@@ -577,3 +577,264 @@ class TestErrorHandling:
                 await client.fetch_candidate_issues()
             finally:
                 await client.close()
+
+
+class TestGetIssue:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_issue_returns_fields(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issues": {
+                            "nodes": [
+                                {
+                                    "id": "issue-id-1",
+                                    "identifier": "SER-27",
+                                    "title": "Test issue",
+                                    "description": "A description",
+                                    "state": {"name": "Todo"},
+                                    "url": "https://linear.app/issue/SER-27",
+                                }
+                            ]
+                        }
+                    }
+                },
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.get_issue("SER-27")
+        finally:
+            await client.close()
+
+        assert result["id"] == "issue-id-1"
+        assert result["identifier"] == "SER-27"
+        assert result["title"] == "Test issue"
+        assert result["description"] == "A description"
+        assert result["state"] == "Todo"
+        assert result["url"] == "https://linear.app/issue/SER-27"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_get_issue_not_found_raises(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"issues": {"nodes": []}}},
+            )
+        )
+
+        client = LinearClient(_make_config())
+        with pytest.raises(LinearUnknownPayload, match="not found"):
+            try:
+                await client.get_issue("SER-999")
+            finally:
+                await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_issue_invalid_identifier_raises(self):
+        client = LinearClient(_make_config())
+        with pytest.raises(LinearUnknownPayload, match="Invalid identifier"):
+            try:
+                await client.get_issue("INVALID")
+            finally:
+                await client.close()
+
+
+class TestUpdateIssue:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_issue_title(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # First call: get_issue (to resolve internal ID)
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issues": {
+                                "nodes": [
+                                    {
+                                        "id": "issue-id-1",
+                                        "identifier": "SER-27",
+                                        "title": "Old title",
+                                        "description": None,
+                                        "state": {"name": "Todo"},
+                                        "url": "https://linear.app/issue/SER-27",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                ),
+                # Second call: issueUpdate mutation
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issueUpdate": {
+                                "success": True,
+                                "issue": {
+                                    "id": "issue-id-1",
+                                    "identifier": "SER-27",
+                                    "title": "New title",
+                                    "description": None,
+                                    "state": {"name": "Todo"},
+                                    "url": "https://linear.app/issue/SER-27",
+                                },
+                            }
+                        }
+                    },
+                ),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.update_issue("SER-27", title="New title")
+        finally:
+            await client.close()
+
+        assert result["title"] == "New title"
+        assert result["identifier"] == "SER-27"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_issue_state(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # get_issue
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issues": {
+                                "nodes": [
+                                    {
+                                        "id": "issue-id-1",
+                                        "identifier": "SER-27",
+                                        "title": "Test",
+                                        "description": None,
+                                        "state": {"name": "Todo"},
+                                        "url": "https://linear.app/issue/SER-27",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                ),
+                # fetch_workflow_states: issue team
+                _issue_team_response(),
+                # fetch_workflow_states: states
+                _workflow_states_response([
+                    {"id": "state-todo", "name": "Todo"},
+                    {"id": "state-done", "name": "Done"},
+                ]),
+                # issueUpdate mutation
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issueUpdate": {
+                                "success": True,
+                                "issue": {
+                                    "id": "issue-id-1",
+                                    "identifier": "SER-27",
+                                    "title": "Test",
+                                    "description": None,
+                                    "state": {"name": "Done"},
+                                    "url": "https://linear.app/issue/SER-27",
+                                },
+                            }
+                        }
+                    },
+                ),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.update_issue("SER-27", state="Done")
+        finally:
+            await client.close()
+
+        assert result["state"] == "Done"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_issue_no_fields_returns_current(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issues": {
+                            "nodes": [
+                                {
+                                    "id": "issue-id-1",
+                                    "identifier": "SER-27",
+                                    "title": "Test",
+                                    "description": None,
+                                    "state": {"name": "Todo"},
+                                    "url": "https://linear.app/issue/SER-27",
+                                }
+                            ]
+                        }
+                    }
+                },
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.update_issue("SER-27")
+        finally:
+            await client.close()
+
+        assert result["identifier"] == "SER-27"
+        assert result["title"] == "Test"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_update_issue_invalid_state_raises(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # get_issue
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issues": {
+                                "nodes": [
+                                    {
+                                        "id": "issue-id-1",
+                                        "identifier": "SER-27",
+                                        "title": "Test",
+                                        "description": None,
+                                        "state": {"name": "Todo"},
+                                        "url": "https://linear.app/issue/SER-27",
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                ),
+                # fetch_workflow_states: issue team
+                _issue_team_response(),
+                # fetch_workflow_states: states
+                _workflow_states_response([
+                    {"id": "state-todo", "name": "Todo"},
+                ]),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        with pytest.raises(LinearUnknownPayload, match="not found"):
+            try:
+                await client.update_issue("SER-27", state="Nonexistent")
+            finally:
+                await client.close()

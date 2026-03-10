@@ -20,9 +20,11 @@ from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
     COMMENT_CREATE_MUTATION,
     ISSUE_ATTACHMENTS_QUERY,
+    ISSUE_BY_IDENTIFIER_QUERY,
     ISSUE_CREATE_MUTATION,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
+    ISSUE_UPDATE_MUTATION,
     ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
     PROJECT_TEAMS_QUERY,
@@ -189,6 +191,89 @@ class LinearClient:
             {"issueId": issue_id, "body": body},
         )
         return data.get("commentCreate", {}).get("success", False)
+
+    async def get_issue(self, identifier: str) -> dict[str, str | None]:
+        """Fetch an issue by identifier (e.g. SER-27). Returns dict with issue fields."""
+        parts = identifier.upper().rsplit("-", 1)
+        if len(parts) != 2:
+            raise LinearUnknownPayload(f"Invalid identifier format: {identifier}")
+        team_prefix, number_str = parts
+        try:
+            number = int(number_str)
+        except ValueError:
+            raise LinearUnknownPayload(f"Invalid identifier format: {identifier}")
+
+        data = await self._execute(
+            ISSUE_BY_IDENTIFIER_QUERY,
+            {
+                "filter": {
+                    "team": {"key": {"eq": team_prefix}},
+                    "number": {"eq": number},
+                },
+                "first": 1,
+            },
+        )
+        nodes = data.get("issues", {}).get("nodes", [])
+        if not nodes:
+            raise LinearUnknownPayload(f"Issue {identifier} not found")
+
+        node = nodes[0]
+        return {
+            "id": node.get("id", ""),
+            "identifier": node.get("identifier", ""),
+            "title": node.get("title", ""),
+            "description": node.get("description"),
+            "state": (node.get("state") or {}).get("name", ""),
+            "url": node.get("url", ""),
+        }
+
+    async def update_issue(
+        self,
+        identifier: str,
+        title: str | None = None,
+        description: str | None = None,
+        state: str | None = None,
+    ) -> dict[str, str | None]:
+        """Update an issue by identifier. Returns dict with updated issue fields."""
+        # First, get the issue to find its internal ID
+        issue_data = await self.get_issue(identifier)
+        issue_id = issue_data["id"]
+
+        input_fields: dict = {}
+        if title is not None:
+            input_fields["title"] = title
+        if description is not None:
+            input_fields["description"] = description
+        if state is not None:
+            # Resolve state name to state ID
+            states = await self.fetch_workflow_states(issue_id=issue_id)
+            state_id = states.get(state)
+            if not state_id:
+                raise LinearUnknownPayload(
+                    f"State '{state}' not found; available states: {list(states.keys())}"
+                )
+            input_fields["stateId"] = state_id
+
+        if not input_fields:
+            return issue_data  # nothing to update
+
+        data = await self._execute(
+            ISSUE_UPDATE_MUTATION,
+            {"issueId": issue_id, "input": input_fields},
+        )
+        result = data.get("issueUpdate", {})
+        if not result.get("success"):
+            raise LinearUnknownPayload("issueUpdate returned success=false")
+
+        issue = result.get("issue", {})
+        return {
+            "id": issue.get("id", ""),
+            "identifier": issue.get("identifier", ""),
+            "title": issue.get("title", ""),
+            "description": issue.get("description"),
+            "state": (issue.get("state") or {}).get("name", ""),
+            "url": issue.get("url", ""),
+        }
 
     async def create_issue(
         self,

@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue"}
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -37,6 +37,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     create_parser.add_argument("--title", required=True, help="Issue title")
     create_parser.add_argument("--description", default=None, help="Issue description (markdown)")
     _add_common_args(create_parser)
+
+    # Get issue
+    get_parser = subparsers.add_parser(
+        "get-issue", help="Get an existing issue from Linear by identifier"
+    )
+    get_parser.add_argument("--identifier", required=True, help="Issue identifier (e.g. SER-27)")
+    _add_common_args(get_parser)
+
+    # Update issue
+    update_parser = subparsers.add_parser(
+        "update-issue", help="Update an existing issue in Linear"
+    )
+    update_parser.add_argument("--identifier", required=True, help="Issue identifier (e.g. SER-27)")
+    update_parser.add_argument("--title", default=None, help="New issue title")
+    update_parser.add_argument("--description", default=None, help="New issue description (markdown)")
+    update_parser.add_argument("--state", default=None, help="New issue state (e.g. 'In Progress', 'Done')")
+    _add_common_args(update_parser)
 
     # Backward compat: if first arg is not a known subcommand, insert "run"
     # so that e.g. `pyphony my_workflow.md` or `pyphony --port 8080` works
@@ -98,6 +115,12 @@ def main() -> None:
     elif args.command == "create-issue":
         from .create_issue import create_issue
         create_issue(args)
+    elif args.command == "get-issue":
+        from .issue_commands import get_issue
+        get_issue(args)
+    elif args.command == "update-issue":
+        from .issue_commands import update_issue
+        update_issue(args)
     else:
         from .service import run_service
         run_service(args)

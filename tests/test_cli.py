@@ -53,3 +53,34 @@ class TestParseArgs:
         args = parse_args(["run", "my_workflow.md"])
         assert args.command == "run"
         assert args.workflow_file == "my_workflow.md"
+
+    def test_get_issue_subcommand(self):
+        args = parse_args(["get-issue", "--identifier", "SER-27"])
+        assert args.command == "get-issue"
+        assert args.identifier == "SER-27"
+        assert args.workflow_file == "WORKFLOW.md"
+
+    def test_update_issue_subcommand(self):
+        args = parse_args([
+            "update-issue", "--identifier", "SER-27",
+            "--title", "New title", "--state", "Done",
+        ])
+        assert args.command == "update-issue"
+        assert args.identifier == "SER-27"
+        assert args.title == "New title"
+        assert args.state == "Done"
+        assert args.description is None
+        assert args.workflow_file == "WORKFLOW.md"
+
+    def test_update_issue_with_description(self):
+        args = parse_args([
+            "update-issue", "--identifier", "SER-27",
+            "--description", "Updated description",
+            "custom.md",
+        ])
+        assert args.command == "update-issue"
+        assert args.identifier == "SER-27"
+        assert args.description == "Updated description"
+        assert args.title is None
+        assert args.state is None
+        assert args.workflow_file == "custom.md"
