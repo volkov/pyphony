@@ -18,10 +18,13 @@ Use this skill when the user asks to create a task, issue, or ticket in Linear. 
 3. Run the CLI command:
 
 ```
-uv run python -m pyphony create-issue WORKFLOW.md --title "Title here" --description "Description here"
+uv run python -m pyphony create-issue WORKFLOW.md --title "Title here" --description "Description here" [--state "Todo"]
 ```
 
-The command reads `WORKFLOW.md` for the Linear API key and project slug, then creates an issue in **Backlog** state via the Linear GraphQL API.
+The command reads `WORKFLOW.md` for the Linear API key and project slug, then creates an issue via the Linear GraphQL API.
+
+- By default (no `--state`) the issue is created in **Backlog** state.
+- Use `--state Todo` to create the issue in **Todo** state — pyphony will pick it up and dispatch an agent to work on it immediately.
 
 4. The command outputs JSON with `id`, `identifier`, `title`, and `url` of the created issue.
 5. Show the user the result: issue identifier and a link to it.

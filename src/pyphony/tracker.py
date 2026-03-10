@@ -414,8 +414,12 @@ class LinearClient:
         self,
         title: str,
         description: str | None = None,
+        state: str | None = None,
     ) -> dict[str, str]:
-        """Create an issue in Backlog state. Returns dict with id, identifier, title, url."""
+        """Create an issue. Returns dict with id, identifier, title, url.
+
+        *state* defaults to ``"Backlog"`` when not given.
+        """
         # Step 1: resolve project ID and team ID from project slug
         proj_data = await self._execute(
             PROJECT_TEAMS_QUERY,
@@ -436,7 +440,8 @@ class LinearClient:
             )
         team_id = teams[0]["id"]
 
-        # Step 2: resolve Backlog state ID for the team
+        # Step 2: resolve target state ID for the team
+        target_state = state or "Backlog"
         states_data = await self._execute(
             WORKFLOW_STATES_QUERY,
             {"teamId": team_id},
@@ -445,10 +450,10 @@ class LinearClient:
             n["name"]: n["id"]
             for n in states_data.get("workflowStates", {}).get("nodes", [])
         }
-        backlog_state_id = states.get("Backlog")
-        if not backlog_state_id:
+        resolved_state_id = states.get(target_state)
+        if not resolved_state_id:
             raise LinearUnknownPayload(
-                f"Backlog state not found; available states: {list(states.keys())}"
+                f"{target_state} state not found; available states: {list(states.keys())}"
             )
 
         # Step 3: create the issue
@@ -456,7 +461,7 @@ class LinearClient:
             "teamId": team_id,
             "title": title,
             "projectId": project_id,
-            "stateId": backlog_state_id,
+            "stateId": resolved_state_id,
         }
         if description:
             variables["description"] = description

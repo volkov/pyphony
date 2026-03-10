@@ -36,6 +36,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     create_parser.add_argument("--title", required=True, help="Issue title")
     create_parser.add_argument("--description", default=None, help="Issue description (markdown)")
+    create_parser.add_argument("--state", default=None, help="Initial state (default: Backlog). Use 'Todo' to queue for immediate execution.")
     _add_common_args(create_parser)
 
     # Get issue
