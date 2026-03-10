@@ -1,11 +1,14 @@
 """pyphony-sv: Supervisor that auto-updates and restarts pyphony.
 
 Usage:
-    pyphony-sv [WORKFLOW.md] [--pull-interval SECONDS] [-- extra args for pyphony run]
+    pyphony-sv [WORKFLOW_FILES...] [--pull-interval SECONDS] [-- extra args for pyphony run]
 
-Loop:
+    If no workflow files are given, all *.md files in the workflows/ directory
+    are used automatically.
+
+Loop (per workflow):
     1. git pull --rebase
-    2. uv run python -m pyphony run WORKFLOW.md --exit-on-merge [extra args]
+    2. uv run python -m pyphony run <workflow> --exit-on-merge [extra args]
     3. If process exits with code 10 (merge detected) → restart from step 1
     4. If process exits with 0 or signal → stop
 """
@@ -17,9 +20,23 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 EXIT_CODE_MERGE = 10
 DEFAULT_PULL_INTERVAL = 0  # seconds between pull retries when app exits normally
+DEFAULT_WORKFLOWS_DIR = "workflows"
+
+
+def _discover_workflows(directory: str) -> list[str]:
+    """Find all *.md workflow files in the given directory."""
+    workflows_dir = Path(directory)
+    if not workflows_dir.is_dir():
+        print(f"[pyphony-sv] workflows directory not found: {directory}")
+        return []
+    files = sorted(str(p) for p in workflows_dir.glob("*.md"))
+    if not files:
+        print(f"[pyphony-sv] no workflow files found in {directory}")
+    return files
 
 
 def _git_pull() -> bool:
@@ -46,8 +63,8 @@ def _git_pull() -> bool:
         return False
 
 
-def _run_app(workflow_file: str, extra_args: list[str]) -> int:
-    """Run pyphony with --exit-on-merge. Returns exit code."""
+def _run_app(workflow_file: str, extra_args: list[str]) -> subprocess.Popen:
+    """Start pyphony with --exit-on-merge. Returns the Popen process."""
     cmd = [
         sys.executable, "-m", "pyphony",
         "run", workflow_file,
@@ -55,11 +72,7 @@ def _run_app(workflow_file: str, extra_args: list[str]) -> int:
         *extra_args,
     ]
     print(f"[pyphony-sv] starting: {' '.join(cmd)}")
-    try:
-        proc = subprocess.run(cmd)
-        return proc.returncode
-    except KeyboardInterrupt:
-        return 0
+    return subprocess.Popen(cmd)
 
 
 def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
@@ -68,10 +81,12 @@ def _parse_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list
         description="Pyphony supervisor with auto-update on merge",
     )
     parser.add_argument(
-        "workflow_file",
-        nargs="?",
-        default="WORKFLOW.md",
-        help="Path to WORKFLOW.md (default: WORKFLOW.md)",
+        "workflow_files",
+        nargs="*",
+        help=(
+            "Paths to workflow .md files. "
+            f"If omitted, all *.md files in {DEFAULT_WORKFLOWS_DIR}/ are used."
+        ),
     )
     parser.add_argument(
         "--pull-interval",
@@ -112,7 +127,15 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle_signal)
     signal.signal(signal.SIGTERM, _handle_signal)
 
-    print(f"[pyphony-sv] supervisor started (workflow={args.workflow_file})")
+    # Resolve workflow files: explicit args or auto-discover from workflows/
+    workflow_files = args.workflow_files
+    if not workflow_files:
+        workflow_files = _discover_workflows(DEFAULT_WORKFLOWS_DIR)
+        if not workflow_files:
+            print("[pyphony-sv] no workflows to run, exiting")
+            return
+
+    print(f"[pyphony-sv] supervisor started (workflows={workflow_files})")
 
     while _running:
         # Step 1: pull latest code
@@ -121,24 +144,50 @@ def main() -> None:
         if not _running:
             break
 
-        # Step 2: run the app
-        exit_code = _run_app(args.workflow_file, extra)
+        # Step 2: start all workflows in parallel
+        processes: dict[str, subprocess.Popen] = {}
+        for wf in workflow_files:
+            processes[wf] = _run_app(wf, extra)
+
+        # Step 3: wait for all processes, collect exit codes
+        merge_detected = False
+        any_error = False
+        while processes and _running:
+            for wf, proc in list(processes.items()):
+                ret = proc.poll()
+                if ret is not None:
+                    processes.pop(wf)
+                    if ret == EXIT_CODE_MERGE:
+                        print(f"[pyphony-sv] merge detected in {wf} (exit code 10)")
+                        merge_detected = True
+                    elif ret == 0:
+                        print(f"[pyphony-sv] {wf} exited cleanly")
+                    else:
+                        print(f"[pyphony-sv] {wf} exited with code {ret}")
+                        any_error = True
+            if processes:
+                time.sleep(0.5)
 
         if not _running:
+            # Terminate remaining processes
+            for wf, proc in processes.items():
+                proc.terminate()
+            for wf, proc in processes.items():
+                proc.wait(timeout=10)
             break
 
-        if exit_code == EXIT_CODE_MERGE:
-            print("[pyphony-sv] merge detected (exit code 10), pulling and restarting...")
+        if merge_detected:
+            print("[pyphony-sv] merge detected, pulling and restarting all workflows...")
             continue
-        elif exit_code == 0:
-            print("[pyphony-sv] app exited cleanly, stopping supervisor")
-            break
-        else:
-            print(f"[pyphony-sv] app exited with code {exit_code}, restarting in 5s...")
+        elif any_error:
+            print("[pyphony-sv] error detected, restarting in 5s...")
             for _ in range(50):  # 5 seconds in 0.1s increments
                 if not _running:
                     break
                 time.sleep(0.1)
+        else:
+            print("[pyphony-sv] all workflows exited cleanly, stopping supervisor")
+            break
 
     print("[pyphony-sv] supervisor stopped")
 
