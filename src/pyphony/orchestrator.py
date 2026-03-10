@@ -341,7 +341,7 @@ class Orchestrator:
             merge_conflict = False
 
             if plan_required:
-                # Plan is complete — swap labels and move to Backlog
+                # Plan is complete — swap labels and move to In Review
                 try:
                     await self._tracker.replace_issue_labels(
                         issue_id,
@@ -359,7 +359,7 @@ class Orchestrator:
                         error=str(exc),
                     )
 
-                target_state = "Backlog"
+                target_state = "In Review"
             elif resolve_conflict:
                 # Conflict resolution agent finished — remove label, retry automerge
                 try:
@@ -401,8 +401,8 @@ class Orchestrator:
                     )
 
                 if merge_conflict:
-                    # Still can't merge — re-add label and go back to Backlog
-                    target_state = "Backlog"
+                    # Still can't merge — re-add label and move to In Review
+                    target_state = "In Review"
                     try:
                         await self._tracker.replace_issue_labels(
                             issue_id,
@@ -415,7 +415,7 @@ class Orchestrator:
                         await self._tracker.comment_on_issue(
                             issue_id,
                             "⚠️ Conflict resolution completed but PR still cannot be merged. "
-                            "Returning to Backlog for another attempt.",
+                            "Moving to In Review for another attempt.",
                         )
                     except Exception:
                         pass
@@ -449,8 +449,8 @@ class Orchestrator:
 
                 if merge_conflict:
                     # PR could not be merged — add resolve-conflict label,
-                    # post a comment, and move to Backlog instead of Done.
-                    target_state = "Backlog"
+                    # post a comment, and move to In Review instead of Done.
+                    target_state = "In Review"
                     try:
                         await self._tracker.replace_issue_labels(
                             issue_id,
@@ -470,7 +470,7 @@ class Orchestrator:
 
                     conflict_comment = (
                         f"⚠️ PR could not be merged due to conflicts: {conflict_pr_url}\n\n"
-                        "The issue has been moved to Backlog with the `resolve-conflict` label.\n"
+                        "The issue has been moved to In Review with the `resolve-conflict` label.\n"
                         "Move it to Todo to trigger automatic conflict resolution."
                     )
                     try:
