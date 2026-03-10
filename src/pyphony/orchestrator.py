@@ -47,6 +47,7 @@ class Orchestrator:
         self.exit_on_merge: bool = False
         self.merge_detected: bool = False
         self.merge_detected_event: asyncio.Event | None = None
+        self._draining: bool = False
 
     @property
     def state(self) -> OrchestratorRuntimeState:
@@ -59,6 +60,17 @@ class Orchestrator:
 
     async def poll_tick(self) -> dict[str, int]:
         await self.reconcile_running_issues()
+
+        if self._draining:
+            running = len(self._state.running)
+            log.info("draining", running=running)
+            if running == 0:
+                self._signal_merge_exit()
+            return {
+                "dispatched": 0,
+                "running": running,
+                "retrying": 0,
+            }
 
         errors = validate_dispatch_config(self._config)
         if errors:
@@ -295,13 +307,14 @@ class Orchestrator:
                 )
 
             if self.exit_on_merge and target_state == "Done":
-                log.info(
-                    "exit_on_merge_triggered",
-                    issue_identifier=entry.issue.identifier,
-                )
-                self.merge_detected = True
-                if self.merge_detected_event:
-                    self.merge_detected_event.set()
+                self._enter_drain_mode(entry.issue.identifier)
+
+        # While draining, skip retries and check if drain is complete
+        if self._draining:
+            self._release_claim(issue_id)
+            if not self._state.running:
+                self._signal_merge_exit()
+            return
 
         current_attempt = entry.attempt.attempt or 0
         max_runs = self._config.agent.max_runs
@@ -334,6 +347,34 @@ class Orchestrator:
             delay_ms=delay_ms,
             error=error,
         )
+
+    def _enter_drain_mode(self, trigger_identifier: str) -> None:
+        """Enter drain mode: stop accepting new work, wait for running jobs."""
+        if self._draining:
+            return
+        self._draining = True
+        log.info(
+            "drain_started",
+            triggered_by=trigger_identifier,
+            running=len(self._state.running),
+        )
+
+        # Cancel all pending retries — we don't want to start new work
+        for issue_id, retry in list(self._state.retry_attempts.items()):
+            if retry.timer_handle:
+                retry.timer_handle.cancel()
+        self._state.retry_attempts.clear()
+
+        # If nothing is running right now, signal immediately
+        if not self._state.running:
+            self._signal_merge_exit()
+
+    def _signal_merge_exit(self) -> None:
+        """Signal the service to stop after drain completes."""
+        log.info("drain_complete")
+        self.merge_detected = True
+        if self.merge_detected_event:
+            self.merge_detected_event.set()
 
     def _schedule_retry(
         self,
