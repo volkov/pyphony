@@ -1301,6 +1301,57 @@ class TestPlanRequired:
         assert not orch.merge_detected_event.is_set()
 
     @pytest.mark.asyncio
+    async def test_plan_required_transitions_without_done_marker(self, tmp_path):
+        """Plan-required issue transitions to Backlog on normal exit even without [DONE] marker."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my plan")
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["plan required"],
+                add_labels=["with plan"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+        # Claim should be released to prevent re-dispatch
+        assert issue.id not in orch.state.claimed
+
+    @pytest.mark.asyncio
+    async def test_plan_required_releases_claim_after_transition(self, tmp_path):
+        """Plan-required completion releases the claim so no retry is scheduled."""
+        config = _make_config(tmp_path)
+        config.agent.max_runs = 3  # allow retries in general
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan [DONE]")
+
+        # Claim released and no retry scheduled
+        assert issue.id not in orch.state.claimed
+        assert issue.id not in orch.state.retry_attempts
+
+    @pytest.mark.asyncio
     async def test_plan_required_takes_priority_over_review_required(self, tmp_path):
         """When both 'plan required' and 'review required' labels are present,
         'plan required' should take priority."""
