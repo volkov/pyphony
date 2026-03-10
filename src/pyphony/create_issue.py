@@ -21,6 +21,7 @@ async def _create_issue(args: argparse.Namespace) -> None:
         result = await tracker.create_issue(
             title=args.title,
             description=args.description,
+            state=getattr(args, "state", None),
         )
         print(json.dumps(result, indent=2))
     finally:

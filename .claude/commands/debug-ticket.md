@@ -79,3 +79,28 @@ What should be done to fix or re-run this ticket successfully.
 ```
 
 Be thorough but concise. Focus on actionable findings.
+
+### 7. Suggest next actions
+
+If the report identified any issues or problems, present the user with action options:
+
+```
+### What would you like to do?
+
+1. 🔧 **Fix it here** — I'll try to fix the issue right now in this session
+2. 🚀 **Create a ticket & execute now (Todo)** — create a Linear ticket in Todo state so pyphony picks it up immediately
+3. 📋 **Create a ticket in Backlog** — create a Linear ticket in Backlog for later
+```
+
+Wait for the user to choose an option, then:
+
+- **Option 1**: Investigate the root cause and implement a fix directly. Follow normal development workflow (edit code, test, commit).
+- **Option 2**: Use the create-task skill to create a ticket with `--state Todo`:
+  ```
+  uv run python -m pyphony create-issue WORKFLOW.md --title "Fix: <concise problem summary>" --description "<details from debug report>" --state Todo
+  ```
+  This puts the issue in Todo state so pyphony will dispatch an agent to work on it immediately.
+- **Option 3**: Use the create-task skill to create a ticket in Backlog (default):
+  ```
+  uv run python -m pyphony create-issue WORKFLOW.md --title "Fix: <concise problem summary>" --description "<details from debug report>"
+  ```
