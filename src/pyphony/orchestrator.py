@@ -315,10 +315,14 @@ class Orchestrator:
             )
 
         # Transition issue based on completion and review requirements
-        if normal and result and "[DONE]" in result:
-            issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
+        issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
+        plan_required = "plan required" in issue_labels_norm
+        done_signaled = normal and result and "[DONE]" in result
+
+        # For plan-required issues, a normal exit is sufficient to trigger
+        # the transition — the agent may not include [DONE] in its result.
+        if done_signaled or (normal and plan_required):
             review_required = "review required" in issue_labels_norm
-            plan_required = "plan required" in issue_labels_norm
 
             if plan_required:
                 # Plan is complete — swap labels and move to Backlog
@@ -379,6 +383,12 @@ class Orchestrator:
 
             if self.exit_on_merge and target_state == "Done":
                 self._enter_drain_mode(entry.issue.identifier)
+
+            # Plan-required work is complete — release claim and skip retries
+            # to prevent re-dispatch on the next poll cycle.
+            if plan_required:
+                self._release_claim(issue_id)
+                return
 
         # While draining, skip retries and check if drain is complete
         if self._draining:
