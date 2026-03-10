@@ -55,6 +55,7 @@ query IssueStatesByIds($ids: [ID!]!, $first: Int!, $after: String) {
     nodes {
       id
       state { name }
+      labels { nodes { name } }
     }
     pageInfo {
       hasNextPage

@@ -25,6 +25,7 @@ from .tracker import LinearClient
 from .workspace import WorkspaceManager
 
 _IN_PROGRESS_STATE = "In Progress"
+_WORKFLOW_ISSUE_LABEL = "workflow issue"
 
 log = structlog.stdlib.get_logger()
 
@@ -123,8 +124,18 @@ class Orchestrator:
             "retrying": len(self._state.retry_attempts),
         }
 
+    @staticmethod
+    def _has_workflow_issue_label(issue: Issue) -> bool:
+        """Return True if the issue carries the 'workflow issue' label."""
+        return _WORKFLOW_ISSUE_LABEL in [
+            normalize_label(l) for l in issue.labels
+        ]
+
     def _is_dispatch_eligible(self, issue: Issue) -> bool:
         if not issue.id or not issue.identifier or not issue.title or not issue.state:
+            return False
+
+        if self._has_workflow_issue_label(issue):
             return False
 
         active = {normalize_state(s) for s in self._config.tracker.active_states}
@@ -527,6 +538,8 @@ class Orchestrator:
         await self._dispatch(target, retry_attempt=entry.attempt)
 
     def _is_dispatch_eligible_for_retry(self, issue: Issue) -> bool:
+        if self._has_workflow_issue_label(issue):
+            return False
         active = {normalize_state(s) for s in self._config.tracker.active_states}
         terminal = {normalize_state(s) for s in self._config.tracker.terminal_states}
         issue_state = normalize_state(issue.state)
@@ -575,7 +588,7 @@ class Orchestrator:
             return
 
         try:
-            states = await self._tracker.fetch_issue_states_by_ids(running_ids)
+            issue_info = await self._tracker.fetch_issue_states_by_ids(running_ids)
         except Exception as exc:
             log.error("reconciliation_fetch_failed", error=str(exc))
             return
@@ -588,9 +601,25 @@ class Orchestrator:
                 continue
 
             entry = self._state.running[issue_id]
-            current_state = states.get(issue_id)
+            info = issue_info.get(issue_id)
 
-            if current_state is None:
+            if info is None:
+                continue
+
+            current_state = info["state"]
+            current_labels = info.get("labels", [])
+
+            # Kill agent if issue now has "workflow issue" label
+            if _WORKFLOW_ISSUE_LABEL in [
+                normalize_label(l) for l in current_labels
+            ]:
+                log.info(
+                    "reconcile_workflow_issue",
+                    issue_identifier=entry.issue.identifier,
+                )
+                await self._kill_worker(issue_id)
+                self._state.running.pop(issue_id, None)
+                self._release_claim(issue_id)
                 continue
 
             normalized = normalize_state(current_state)
