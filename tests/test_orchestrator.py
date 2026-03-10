@@ -17,7 +17,7 @@ from pyphony.models import (
     TrackerConfig,
     WorkspaceConfig,
 )
-from pyphony.orchestrator import Orchestrator
+from pyphony.orchestrator import Orchestrator, _build_transcript_url
 from pyphony.tracker import LinearClient
 from pyphony.workspace import WorkspaceManager
 
@@ -584,6 +584,75 @@ class TestCommentOnExit:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
 
         assert call_order == ["comment", "transition"]
+
+    @pytest.mark.asyncio
+    async def test_comment_includes_transcript_link(self, tmp_path):
+        """Comment body includes a transcript viewer link when transcript_path is provided."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        transcript_path = "/home/user/.claude/projects/-Users-user-my-project/abc-123.jsonl"
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None,
+                result="Here is my summary",
+                transcript_path=transcript_path,
+            )
+            expected_body = (
+                "Here is my summary"
+                "\n\n---\n"
+                "[Transcript](http://localhost:3939/#/session/-Users-user-my-project/abc-123)"
+            )
+            mock_comment.assert_called_once_with(issue.id, expected_body)
+
+    @pytest.mark.asyncio
+    async def test_comment_no_transcript_link_without_path(self, tmp_path):
+        """Comment body has no transcript link when transcript_path is None."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None,
+                result="Here is my summary",
+                transcript_path=None,
+            )
+            mock_comment.assert_called_once_with(issue.id, "Here is my summary")
+
+
+class TestBuildTranscriptUrl:
+    def test_valid_path(self):
+        url = _build_transcript_url(
+            "http://localhost:3939",
+            "/home/user/.claude/projects/-Users-user-workspace/session-id-123.jsonl",
+        )
+        assert url == "http://localhost:3939/#/session/-Users-user-workspace/session-id-123"
+
+    def test_trailing_slash_in_base_url(self):
+        url = _build_transcript_url(
+            "http://localhost:3939/",
+            "/home/user/.claude/projects/-Users-user-workspace/session-id-123.jsonl",
+        )
+        assert url == "http://localhost:3939/#/session/-Users-user-workspace/session-id-123"
+
+    def test_none_path(self):
+        assert _build_transcript_url("http://localhost:3939", None) is None
+
+    def test_empty_path(self):
+        assert _build_transcript_url("http://localhost:3939", "") is None
 
 
 class TestReconciliation:
