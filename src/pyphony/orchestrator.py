@@ -55,11 +55,16 @@ class Orchestrator:
         tracker: LinearClient,
         workspace_mgr: WorkspaceManager,
         run_agent_fn=None,
+        *,
+        excluded_issue_ids_fn: callable | None = None,
+        peer_running_fn: callable | None = None,
     ) -> None:
         self._config = config
         self._tracker = tracker
         self._workspace_mgr = workspace_mgr
         self._run_agent_fn = run_agent_fn
+        self._excluded_issue_ids_fn = excluded_issue_ids_fn
+        self._peer_running_fn = peer_running_fn
         self._state = OrchestratorRuntimeState(
             poll_interval_ms=config.polling.interval_ms,
             max_concurrent_agents=config.agent.max_concurrent_agents,
@@ -68,10 +73,25 @@ class Orchestrator:
         self.merge_detected: bool = False
         self.merge_detected_event: asyncio.Event | None = None
         self._draining: bool = False
+        self._drain_kind: str | None = None  # "merge" or "reload"
+        self.drain_complete_event: asyncio.Event = asyncio.Event()
 
     @property
     def state(self) -> OrchestratorRuntimeState:
         return self._state
+
+    @property
+    def is_fully_drained(self) -> bool:
+        """True when draining and no running agents or pending retries remain."""
+        return (
+            self._draining
+            and not self._state.running
+            and not self._state.retry_attempts
+        )
+
+    @property
+    def draining(self) -> bool:
+        return self._draining
 
     def update_config(self, config: ServiceConfig) -> None:
         self._config = config
@@ -85,7 +105,7 @@ class Orchestrator:
             running = len(self._state.running)
             log.info("draining", running=running)
             if running == 0:
-                self._signal_merge_exit()
+                self._signal_drain_complete()
             return {
                 "dispatched": 0,
                 "running": running,
@@ -150,6 +170,12 @@ class Orchestrator:
         if issue.id in self._state.claimed:
             return False
 
+        # Skip issues being processed by peer (draining) orchestrators
+        if self._excluded_issue_ids_fn:
+            excluded = self._excluded_issue_ids_fn()
+            if issue.id in excluded:
+                return False
+
         for blocker in issue.blocked_by:
             if blocker.state and normalize_state(blocker.state) not in terminal:
                 return False
@@ -158,7 +184,9 @@ class Orchestrator:
 
     def _available_slots(self, state: str) -> int:
         running_count = len(self._state.running)
-        global_available = max(self._state.max_concurrent_agents - running_count, 0)
+        peer_running = self._peer_running_fn() if self._peer_running_fn else 0
+        total_running = running_count + peer_running
+        global_available = max(self._state.max_concurrent_agents - total_running, 0)
 
         normalized = normalize_state(state)
         by_state = self._config.agent.max_concurrent_agents_by_state
@@ -540,7 +568,7 @@ class Orchestrator:
         if self._draining:
             self._release_claim(issue_id)
             if not self._state.running:
-                self._signal_merge_exit()
+                self._signal_drain_complete()
             return
 
         current_attempt = entry.attempt.attempt or 0
@@ -575,14 +603,24 @@ class Orchestrator:
             error=error,
         )
 
-    def _enter_drain_mode(self, trigger_identifier: str) -> None:
-        """Enter drain mode: stop accepting new work, wait for running jobs."""
+    def _enter_drain_mode(
+        self, trigger_identifier: str, *, kind: str = "merge",
+    ) -> None:
+        """Enter drain mode: stop accepting new work, wait for running jobs.
+
+        *kind* controls post-drain behaviour:
+        - ``"merge"`` — signal merge exit (existing behaviour for exit_on_merge).
+        - ``"reload"`` — set ``drain_complete_event`` so the service layer can
+          clean up this processor generation without stopping the whole service.
+        """
         if self._draining:
             return
         self._draining = True
+        self._drain_kind = kind
         log.info(
             "drain_started",
             triggered_by=trigger_identifier,
+            kind=kind,
             running=len(self._state.running),
         )
 
@@ -594,14 +632,19 @@ class Orchestrator:
 
         # If nothing is running right now, signal immediately
         if not self._state.running:
-            self._signal_merge_exit()
+            self._signal_drain_complete()
 
-    def _signal_merge_exit(self) -> None:
-        """Signal the service to stop after drain completes."""
-        log.info("drain_complete")
-        self.merge_detected = True
-        if self.merge_detected_event:
-            self.merge_detected_event.set()
+    def _signal_drain_complete(self) -> None:
+        """Signal that drain has finished — dispatch to merge or reload handler."""
+        log.info("drain_complete", kind=self._drain_kind)
+        self.drain_complete_event.set()
+        if self._drain_kind == "merge":
+            self.merge_detected = True
+            if self.merge_detected_event:
+                self.merge_detected_event.set()
+
+    # Keep legacy alias used by service.py drain coordinator.
+    _signal_merge_exit = _signal_drain_complete
 
     def _schedule_retry(
         self,
