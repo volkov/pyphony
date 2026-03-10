@@ -50,6 +50,7 @@ class PollingConfig(BaseModel):
 
 class WorkspaceConfig(BaseModel):
     root: str | None = None
+    repo: str | None = None  # Path to local git repo; enables worktree mode
 
 
 class HooksConfig(BaseModel):

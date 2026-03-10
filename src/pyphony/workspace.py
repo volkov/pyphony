@@ -16,10 +16,54 @@ class WorkspaceManager:
     def __init__(self, config: ServiceConfig) -> None:
         self._workspace_root = Path(config.workspace.root).resolve()
         self._hooks = config.hooks
+        self._repo = (
+            Path(config.workspace.repo).resolve()
+            if config.workspace.repo
+            else None
+        )
 
     @property
     def workspace_root(self) -> Path:
         return self._workspace_root
+
+    # ------------------------------------------------------------------
+    # Internal git helper
+    # ------------------------------------------------------------------
+
+    async def _run_git(self, *args: str, cwd: Path | str) -> str:
+        """Run ``git <args>`` as a subprocess. Returns stdout on success."""
+        timeout_s = self._hooks.timeout_ms / 1000.0
+
+        proc = await asyncio.create_subprocess_exec(
+            "git",
+            *args,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout, stderr = await asyncio.wait_for(
+                proc.communicate(), timeout=timeout_s
+            )
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            raise HookTimeoutError(
+                f"git {' '.join(args)} timed out after {self._hooks.timeout_ms}ms"
+            )
+
+        if proc.returncode != 0:
+            raise HookError(
+                f"git {' '.join(args)} failed (exit {proc.returncode}): "
+                f"{stderr.decode(errors='replace').strip()}"
+            )
+
+        return stdout.decode(errors="replace").strip()
+
+    # ------------------------------------------------------------------
+    # create / reuse
+    # ------------------------------------------------------------------
 
     async def create_or_reuse(self, identifier: str) -> Workspace:
         workspace_key = sanitize_workspace_key(identifier)
@@ -31,6 +75,13 @@ class WorkspaceManager:
                 f"workspace root {self._workspace_root}"
             )
 
+        # ---- worktree mode ----
+        if self._repo is not None:
+            return await self._create_or_reuse_worktree(
+                workspace_key, workspace_path
+            )
+
+        # ---- default (directory) mode ----
         created_now = not workspace_path.exists()
         workspace_path.mkdir(parents=True, exist_ok=True)
 
@@ -46,6 +97,79 @@ class WorkspaceManager:
             workspace_key=workspace_key,
             created_now=created_now,
         )
+
+    async def _create_or_reuse_worktree(
+        self, workspace_key: str, workspace_path: Path
+    ) -> Workspace:
+        assert self._repo is not None
+
+        if not self._repo.is_dir():
+            raise HookError(
+                f"Repo path does not exist or is not a directory: {self._repo}"
+            )
+
+        branch_name = workspace_key
+
+        # Already exists → reuse
+        if workspace_path.exists():
+            return Workspace(
+                path=str(workspace_path),
+                workspace_key=workspace_key,
+                created_now=False,
+            )
+
+        # Try creating a new worktree with a new branch
+        try:
+            await self._run_git(
+                "worktree",
+                "add",
+                str(workspace_path),
+                "-b",
+                branch_name,
+                cwd=self._repo,
+            )
+        except HookError as exc:
+            err_msg = str(exc)
+            # Branch already exists — attach existing branch without -b
+            if "already exists" in err_msg:
+                await self._run_git(
+                    "worktree",
+                    "add",
+                    str(workspace_path),
+                    branch_name,
+                    cwd=self._repo,
+                )
+            else:
+                raise
+
+        # Run after_create hook if configured
+        if self._hooks.after_create:
+            try:
+                await self.run_hook(self._hooks.after_create, str(workspace_path))
+            except Exception:
+                # Clean up the worktree on hook failure
+                try:
+                    await self._run_git(
+                        "worktree",
+                        "remove",
+                        "--force",
+                        str(workspace_path),
+                        cwd=self._repo,
+                    )
+                except Exception:
+                    # Fallback: remove directory manually
+                    shutil.rmtree(workspace_path, ignore_errors=True)
+                raise
+
+        return Workspace(
+            path=str(workspace_path),
+            workspace_key=workspace_key,
+            created_now=True,
+        )
+
+    # ------------------------------------------------------------------
+    # hooks
+    # ------------------------------------------------------------------
 
     async def run_hook(self, hook_script: str, workspace_path: str) -> None:
         timeout_s = self._hooks.timeout_ms / 1000.0
@@ -85,6 +209,10 @@ class WorkspaceManager:
             except Exception as exc:
                 logger.warning("after_run hook failed (ignored): %s", exc)
 
+    # ------------------------------------------------------------------
+    # cleanup
+    # ------------------------------------------------------------------
+
     async def cleanup_workspace(self, identifier: str) -> None:
         workspace_key = sanitize_workspace_key(identifier)
         workspace_path = (self._workspace_root / workspace_key).resolve()
@@ -102,4 +230,19 @@ class WorkspaceManager:
             except Exception as exc:
                 logger.warning("before_remove hook failed (ignored): %s", exc)
 
+        # ---- worktree mode ----
+        if self._repo is not None:
+            try:
+                await self._run_git(
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(workspace_path),
+                    cwd=self._repo,
+                )
+            except Exception as exc:
+                logger.warning("git worktree remove failed (ignored): %s", exc)
+            return
+
+        # ---- default mode ----
         shutil.rmtree(workspace_path, ignore_errors=True)

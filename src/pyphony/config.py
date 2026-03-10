@@ -83,6 +83,14 @@ def service_config_from_workflow(
     if not root:
         root = str(Path(tempfile.gettempdir()) / "symphony_workspaces")
 
+    # --- workspace repo (expand ~/$ for local git repo path) ---
+    repo = w.get("repo")
+    if repo:
+        if isinstance(repo, str) and repo.startswith("$"):
+            repo = _env(repo)
+        if repo and str(repo).startswith("~"):
+            repo = str(Path(repo).expanduser())
+
     # --- hook timeout (must be positive) ---
     hook_timeout = _int(h.get("timeout_ms"), 60000)
     if hook_timeout <= 0:
@@ -125,7 +133,7 @@ def service_config_from_workflow(
             ),
         ),
         polling=PollingConfig(interval_ms=_int(p.get("interval_ms"), 30000)),
-        workspace=WorkspaceConfig(root=root),
+        workspace=WorkspaceConfig(root=root, repo=repo),
         hooks=HooksConfig(
             after_create=h.get("after_create"),
             before_run=h.get("before_run"),
