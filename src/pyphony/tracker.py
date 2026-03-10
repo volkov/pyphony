@@ -66,12 +66,14 @@ class LinearClient:
         }
         return await self._paginate(CANDIDATE_ISSUES_QUERY, variables)
 
-    async def fetch_issue_states_by_ids(self, ids: list[str]) -> dict[str, str]:
-        """Return ``{issue_id: state_name}`` for the given IDs."""
+    async def fetch_issue_states_by_ids(
+        self, ids: list[str]
+    ) -> dict[str, dict[str, object]]:
+        """Return ``{issue_id: {"state": str, "labels": list[str]}}`` for the given IDs."""
         if not ids:
             return {}
 
-        result: dict[str, str] = {}
+        result: dict[str, dict[str, object]] = {}
         after: str | None = None
         while True:
             variables: dict = {
@@ -87,7 +89,14 @@ class LinearClient:
                 raise LinearUnknownPayload("Missing 'issues' key in response data")
 
             for node in issues_data.get("nodes", []):
-                result[node["id"]] = node["state"]["name"]
+                labels = [
+                    label_node["name"].lower()
+                    for label_node in (node.get("labels", {}) or {}).get("nodes", [])
+                ]
+                result[node["id"]] = {
+                    "state": node["state"]["name"],
+                    "labels": labels,
+                }
 
             page_info = issues_data.get("pageInfo", {})
             if page_info.get("hasNextPage"):

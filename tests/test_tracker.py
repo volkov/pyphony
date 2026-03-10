@@ -315,8 +315,8 @@ class TestFetchIssueStatesByIds:
                     "data": {
                         "issues": {
                             "nodes": [
-                                {"id": "id-1", "state": {"name": "Done"}},
-                                {"id": "id-2", "state": {"name": "Todo"}},
+                                {"id": "id-1", "state": {"name": "Done"}, "labels": {"nodes": []}},
+                                {"id": "id-2", "state": {"name": "Todo"}, "labels": {"nodes": [{"name": "bug"}]}},
                             ],
                             "pageInfo": {
                                 "hasNextPage": False,
@@ -334,7 +334,10 @@ class TestFetchIssueStatesByIds:
         finally:
             await client.close()
 
-        assert result == {"id-1": "Done", "id-2": "Todo"}
+        assert result == {
+            "id-1": {"state": "Done", "labels": []},
+            "id-2": {"state": "Todo", "labels": ["bug"]},
+        }
 
 
 def _issue_team_response(team_id="team-1"):

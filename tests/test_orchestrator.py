@@ -49,6 +49,7 @@ def _make_issue(
     priority=1,
     blocked_by=None,
     created_at=None,
+    labels=None,
 ) -> Issue:
     return Issue(
         id=id,
@@ -58,6 +59,7 @@ def _make_issue(
         priority=priority,
         blocked_by=blocked_by or [],
         created_at=created_at or datetime(2024, 1, 1, tzinfo=timezone.utc),
+        labels=labels or [],
     )
 
 
@@ -811,7 +813,7 @@ class TestReconciliation:
                 json={
                     "data": {
                         "issues": {
-                            "nodes": [{"id": "id-1", "state": {"name": "Done"}}],
+                            "nodes": [{"id": "id-1", "state": {"name": "Done"}, "labels": {"nodes": []}}],
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                         }
                     }
@@ -842,7 +844,7 @@ class TestReconciliation:
                 json={
                     "data": {
                         "issues": {
-                            "nodes": [{"id": "id-1", "state": {"name": "In Progress"}}],
+                            "nodes": [{"id": "id-1", "state": {"name": "In Progress"}, "labels": {"nodes": []}}],
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                         }
                     }
@@ -933,7 +935,132 @@ class TestStallDetection:
                 json={
                     "data": {
                         "issues": {
-                            "nodes": [{"id": "id-1", "state": {"name": "Todo"}}],
+                            "nodes": [{"id": "id-1", "state": {"name": "Todo"}, "labels": {"nodes": []}}],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                },
+            )
+        )
+
+        await orch.reconcile_running_issues()
+        await tracker.close()
+
+        assert issue.id in orch.state.running
+
+
+class TestWorkflowIssueLabel:
+    """Tests for skipping/killing agents when 'workflow issue' label is present."""
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_dispatch_skips_workflow_issue(self, tmp_path):
+        """Issues with 'workflow issue' label should not be dispatched."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=AsyncMock())
+
+        issue = _make_issue(labels=["workflow issue"])
+
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(200, json=_graphql_response([
+                _issue_node(id=issue.id, identifier=issue.identifier, state_name="Todo"),
+            ])),
+        )
+
+        assert not orch._is_dispatch_eligible(issue)
+        await tracker.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_dispatch_skips_workflow_issue_normalized(self, tmp_path):
+        """Label normalization: 'workflow-issue' and 'Workflow_Issue' should match."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=AsyncMock())
+
+        for label in ["workflow-issue", "Workflow_Issue", "WORKFLOW ISSUE", "Workflow Issue"]:
+            issue = _make_issue(labels=[label])
+            assert not orch._is_dispatch_eligible(issue), f"Should skip label: {label}"
+
+        await tracker.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_retry_skips_workflow_issue(self, tmp_path):
+        """Issues with 'workflow issue' label should not be eligible for retry."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["workflow issue"])
+        assert not orch._is_dispatch_eligible_for_retry(issue)
+        await tracker.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_reconcile_kills_workflow_issue_agent(self, tmp_path):
+        """Running agent should be killed when issue gets 'workflow issue' label."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issues": {
+                            "nodes": [{
+                                "id": "id-1",
+                                "state": {"name": "In Progress"},
+                                "labels": {"nodes": [{"name": "workflow issue"}]},
+                            }],
+                            "pageInfo": {"hasNextPage": False, "endCursor": None},
+                        }
+                    }
+                },
+            )
+        )
+
+        await orch.reconcile_running_issues()
+        await tracker.close()
+
+        assert issue.id not in orch.state.running
+        assert issue.id not in orch.state.claimed
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_reconcile_keeps_normal_agent(self, tmp_path):
+        """Running agent without 'workflow issue' label should not be killed."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issues": {
+                            "nodes": [{
+                                "id": "id-1",
+                                "state": {"name": "In Progress"},
+                                "labels": {"nodes": [{"name": "review required"}]},
+                            }],
                             "pageInfo": {"hasNextPage": False, "endCursor": None},
                         }
                     }
@@ -1391,7 +1518,7 @@ class TestGracefulDrain:
         orch.state.running[issue.id] = _running_entry(issue)
 
         with patch.object(tracker, "fetch_candidate_issues", new_callable=AsyncMock) as mock_fetch, \
-             patch.object(tracker, "fetch_issue_states_by_ids", new_callable=AsyncMock, return_value={issue.id: "In Progress"}):
+             patch.object(tracker, "fetch_issue_states_by_ids", new_callable=AsyncMock, return_value={issue.id: {"state": "In Progress", "labels": []}}):
             stats = await orch.poll_tick()
 
         mock_fetch.assert_not_called()
