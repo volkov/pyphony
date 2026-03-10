@@ -1202,8 +1202,8 @@ class TestAutomergeOnDone:
             mock_transition.assert_called_once_with(issue.id, "Done")
 
     @pytest.mark.asyncio
-    async def test_automerge_failure_still_transitions_done(self, tmp_path):
-        """Even if automerge fails, issue still transitions to Done."""
+    async def test_automerge_failure_adds_conflict_label_and_transitions_backlog(self, tmp_path):
+        """When automerge fails (merged=False), issue gets resolve-conflict label and goes to Backlog."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1214,13 +1214,21 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
-            mock_transition.assert_called_once_with(issue.id, "Done")
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=[],
+                add_labels=["resolve-conflict"],
+            )
+            # Should post a conflict comment (in addition to the agent result comment)
+            assert mock_comment.call_count == 2  # agent result + conflict comment
 
     @pytest.mark.asyncio
     async def test_automerge_exception_still_transitions_done(self, tmp_path):
@@ -1499,6 +1507,246 @@ class TestPlanRequired:
 
             mock_labels.assert_called_once()
             mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+
+class TestResolveConflict:
+    """Tests for the 'resolve-conflict' label flow."""
+
+    @pytest.mark.asyncio
+    async def test_merge_conflict_sets_label_and_backlog(self, tmp_path):
+        """When automerge returns False, resolve-conflict label is added and issue goes to Backlog."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/42"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=[],
+                add_labels=["resolve-conflict"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+    @pytest.mark.asyncio
+    async def test_merge_conflict_posts_comment_with_pr_url(self, tmp_path):
+        """Conflict comment includes the PR URL."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        pr_url = "https://github.com/org/repo/pull/42"
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[pr_url]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            # Second comment call should be the conflict comment (first is agent result)
+            conflict_call = mock_comment.call_args_list[1]
+            assert pr_url in conflict_call[0][1]
+
+    @pytest.mark.asyncio
+    async def test_merge_conflict_no_exit_on_merge(self, tmp_path):
+        """Merge conflict should NOT trigger exit-on-merge (Backlog != Done)."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert not orch.merge_detected
+        assert not orch.merge_detected_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_merge_conflict_releases_claim(self, tmp_path):
+        """Merge conflict should release claim to prevent retries."""
+        config = _make_config(tmp_path)
+        config.agent.max_runs = 3
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert issue.id not in orch.state.claimed
+        assert issue.id not in orch.state.retry_attempts
+
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_agent_removes_label_and_retries_merge(self, tmp_path):
+        """Agent with resolve-conflict label: on success, label removed and automerge retried."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["resolve-conflict"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Conflicts resolved [DONE]")
+
+            # Label should be removed
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["resolve-conflict"],
+                add_labels=[],
+            )
+            # Should transition to Done after successful merge
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_agent_normal_exit_triggers_flow(self, tmp_path):
+        """resolve-conflict agent triggers flow on normal exit even without [DONE]."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["resolve-conflict"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Conflicts resolved")
+
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_agent_merge_still_fails(self, tmp_path):
+        """If merge still fails after resolve, re-add label and go to Backlog."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["resolve-conflict"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Resolved [DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            # Label removed first, then re-added
+            assert mock_labels.call_count == 2
+            # First call: remove label
+            mock_labels.assert_any_call(
+                issue.id,
+                remove_labels=["resolve-conflict"],
+                add_labels=[],
+            )
+            # Second call: re-add label
+            mock_labels.assert_any_call(
+                issue.id,
+                remove_labels=[],
+                add_labels=["resolve-conflict"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_hyphenated_label(self, tmp_path):
+        """'resolve-conflict' label with hyphen is detected correctly."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["resolve-conflict"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_labels.assert_called_once()
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_resolve_conflict_releases_claim(self, tmp_path):
+        """resolve-conflict agent releases claim after completion to prevent retries."""
+        config = _make_config(tmp_path)
+        config.agent.max_runs = 3
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["resolve-conflict"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        # Claim released, no retries
+        assert issue.id not in orch.state.claimed
+        assert issue.id not in orch.state.retry_attempts
 
 
 class TestGracefulDrain:

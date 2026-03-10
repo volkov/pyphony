@@ -121,3 +121,23 @@ class TestRenderPrompt:
         result = render_prompt("{{ issue.identifier }}", issue, comments=comments)
         assert "Alice" in result
         assert "plan required" in result
+
+    def test_resolve_conflict_label_appends_conflict_instructions(self) -> None:
+        issue = _make_issue(labels=["resolve-conflict"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "Work on ENG-123" in result
+        assert "resolve-conflict" in result
+        assert "rebase" in result.lower() or "merge" in result.lower()
+        assert "[DONE]" in result
+
+    def test_resolve_conflict_case_insensitive(self) -> None:
+        issue = _make_issue(labels=["Resolve-Conflict"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "resolve-conflict" in result
+
+    def test_plan_required_takes_priority_over_resolve_conflict(self) -> None:
+        """When both labels present, plan required should take priority."""
+        issue = _make_issue(labels=["plan required", "resolve-conflict"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "plan required" in result
+        assert "rebase" not in result.lower()

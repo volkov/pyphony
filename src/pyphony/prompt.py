@@ -25,6 +25,23 @@ _PLAN_REQUIRED_SUFFIX = """
 Когда готово — напиши детальный план реализации и [DONE] в последнем сообщении.
 """
 
+_RESOLVE_CONFLICT_SUFFIX = """
+
+---
+**Этот тикет помечен как «resolve-conflict».**
+PR этого тикета не смог быть смержен из-за конфликтов с main веткой.
+
+Твоя задача — разрешить merge-конфликты:
+
+1. `git fetch origin main` — получить последний main
+2. `git rebase origin/main` или `git merge origin/main` — интегрировать изменения
+3. Разрешить все конфликты вручную
+4. `git push --force-with-lease` — запушить обновлённую ветку
+5. Убедиться что код компилируется/проходит базовые проверки
+
+Когда конфликты разрешены и ветка запушена — напиши [DONE] в последнем сообщении.
+"""
+
 
 def render_prompt(
     template: str,
@@ -63,9 +80,11 @@ def render_prompt(
             comment_body = comment.get("body", "")
             rendered += f"\n**{user}** ({created_at}):\n{comment_body}\n"
 
-    # Append plan-specific instructions when "plan required" label is present
+    # Append special instructions based on labels
     issue_labels_normalized = [normalize_label(label) for label in issue.labels]
     if "plan required" in issue_labels_normalized:
         rendered += _PLAN_REQUIRED_SUFFIX
+    elif "resolve conflict" in issue_labels_normalized:
+        rendered += _RESOLVE_CONFLICT_SUFFIX
 
     return rendered

@@ -332,8 +332,13 @@ class Orchestrator:
 
         # For plan-required issues, a normal exit is sufficient to trigger
         # the transition — the agent may not include [DONE] in its result.
-        if done_signaled or (normal and plan_required):
+        # Check for resolve-conflict label — agents dispatched for conflict
+        # resolution follow a similar flow to plan-required.
+        resolve_conflict = "resolve conflict" in issue_labels_norm
+
+        if done_signaled or (normal and plan_required) or (normal and resolve_conflict):
             review_required = "review required" in issue_labels_norm
+            merge_conflict = False
 
             if plan_required:
                 # Plan is complete — swap labels and move to Backlog
@@ -355,12 +360,73 @@ class Orchestrator:
                     )
 
                 target_state = "Backlog"
+            elif resolve_conflict:
+                # Conflict resolution agent finished — remove label, retry automerge
+                try:
+                    await self._tracker.replace_issue_labels(
+                        issue_id,
+                        remove_labels=["resolve-conflict"],
+                        add_labels=[],
+                    )
+                    log.info(
+                        "resolve_conflict_label_removed",
+                        issue_identifier=entry.issue.identifier,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "resolve_conflict_label_remove_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
+                # Re-attempt automerge after conflict resolution
+                target_state = "Done"
+                try:
+                    pr_urls = await self._tracker.fetch_issue_pr_urls(issue_id)
+                    for pr_url in pr_urls:
+                        merged = await try_automerge_pr(pr_url)
+                        log.info(
+                            "automerge_after_resolve_attempt",
+                            issue_identifier=entry.issue.identifier,
+                            pr_url=pr_url,
+                            merged=merged,
+                        )
+                        if not merged:
+                            merge_conflict = True
+                except Exception as exc:
+                    log.warning(
+                        "automerge_after_resolve_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
+                if merge_conflict:
+                    # Still can't merge — re-add label and go back to Backlog
+                    target_state = "Backlog"
+                    try:
+                        await self._tracker.replace_issue_labels(
+                            issue_id,
+                            remove_labels=[],
+                            add_labels=["resolve-conflict"],
+                        )
+                    except Exception:
+                        pass
+                    try:
+                        await self._tracker.comment_on_issue(
+                            issue_id,
+                            "⚠️ Conflict resolution completed but PR still cannot be merged. "
+                            "Returning to Backlog for another attempt.",
+                        )
+                    except Exception:
+                        pass
             elif review_required:
                 # Review is needed — move to "In Review" instead of "Done"
                 target_state = "In Review"
             else:
                 # No review required — try to automerge any attached PRs first
                 target_state = "Done"
+                merge_conflict = False
+                conflict_pr_url: str | None = None
                 try:
                     pr_urls = await self._tracker.fetch_issue_pr_urls(issue_id)
                     for pr_url in pr_urls:
@@ -371,6 +437,9 @@ class Orchestrator:
                             pr_url=pr_url,
                             merged=merged,
                         )
+                        if not merged:
+                            merge_conflict = True
+                            conflict_pr_url = pr_url
                 except Exception as exc:
                     log.warning(
                         "automerge_failed",
@@ -378,26 +447,65 @@ class Orchestrator:
                         error=str(exc),
                     )
 
-                # Rebase worktree branch onto main (linear history)
-                try:
-                    rebased = await self._workspace_mgr.rebase_branch_onto_main(
-                        entry.issue.identifier,
-                    )
-                    if rebased:
+                if merge_conflict:
+                    # PR could not be merged — add resolve-conflict label,
+                    # post a comment, and move to Backlog instead of Done.
+                    target_state = "Backlog"
+                    try:
+                        await self._tracker.replace_issue_labels(
+                            issue_id,
+                            remove_labels=[],
+                            add_labels=["resolve-conflict"],
+                        )
                         log.info(
-                            "branch_rebased_onto_main",
+                            "resolve_conflict_label_added",
                             issue_identifier=entry.issue.identifier,
                         )
-                        # Clean up worktree and delete the merged branch
-                        await self._workspace_mgr.cleanup_workspace(
-                            entry.issue.identifier, delete_branch=True,
+                    except Exception as exc:
+                        log.warning(
+                            "resolve_conflict_label_failed",
+                            issue_identifier=entry.issue.identifier,
+                            error=str(exc),
                         )
-                except Exception as exc:
-                    log.warning(
-                        "rebase_onto_main_failed",
-                        issue_identifier=entry.issue.identifier,
-                        error=str(exc),
+
+                    conflict_comment = (
+                        f"⚠️ PR could not be merged due to conflicts: {conflict_pr_url}\n\n"
+                        "The issue has been moved to Backlog with the `resolve-conflict` label.\n"
+                        "Move it to Todo to trigger automatic conflict resolution."
                     )
+                    try:
+                        await self._tracker.comment_on_issue(issue_id, conflict_comment)
+                        log.info(
+                            "resolve_conflict_comment_posted",
+                            issue_identifier=entry.issue.identifier,
+                        )
+                    except Exception as exc:
+                        log.warning(
+                            "resolve_conflict_comment_failed",
+                            issue_identifier=entry.issue.identifier,
+                            error=str(exc),
+                        )
+                else:
+                    # Rebase worktree branch onto main (linear history)
+                    try:
+                        rebased = await self._workspace_mgr.rebase_branch_onto_main(
+                            entry.issue.identifier,
+                        )
+                        if rebased:
+                            log.info(
+                                "branch_rebased_onto_main",
+                                issue_identifier=entry.issue.identifier,
+                            )
+                            # Clean up worktree and delete the merged branch
+                            await self._workspace_mgr.cleanup_workspace(
+                                entry.issue.identifier, delete_branch=True,
+                            )
+                    except Exception as exc:
+                        log.warning(
+                            "rebase_onto_main_failed",
+                            issue_identifier=entry.issue.identifier,
+                            error=str(exc),
+                        )
 
             try:
                 await self._tracker.transition_issue(issue_id, target_state)
@@ -416,9 +524,9 @@ class Orchestrator:
             if self.exit_on_merge and target_state == "Done":
                 self._enter_drain_mode(entry.issue.identifier)
 
-            # Plan-required work is complete — release claim and skip retries
-            # to prevent re-dispatch on the next poll cycle.
-            if plan_required:
+            # Plan-required or merge-conflict work is complete — release claim
+            # and skip retries to prevent re-dispatch on the next poll cycle.
+            if plan_required or merge_conflict:
                 self._release_claim(issue_id)
                 return
 
