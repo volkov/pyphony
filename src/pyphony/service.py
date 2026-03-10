@@ -80,6 +80,7 @@ async def _run_service(args: argparse.Namespace) -> None:
 
             log.info(
                 "poll_tick",
+                workflow=workflow_path.stem,
                 next_poll_in_s=poll_interval,
                 **stats,
             )
