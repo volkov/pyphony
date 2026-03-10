@@ -63,8 +63,6 @@ async def _run_service(args: argparse.Namespace) -> None:
 
     try:
         while not stop_event.is_set():
-            log.info("poll_tick_start")
-
             wf = load_workflow(workflow_path)
             new_config = service_config_from_workflow(wf.config, workflow_path=workflow_path)
             orchestrator.update_config(new_config)
@@ -72,9 +70,13 @@ async def _run_service(args: argparse.Namespace) -> None:
 
             poll_interval = new_config.polling.interval_ms / 1000.0
 
-            await orchestrator.poll_tick()
+            stats = await orchestrator.poll_tick()
 
-            log.info("poll_tick_complete", next_poll_in_s=poll_interval)
+            log.info(
+                "poll_tick",
+                next_poll_in_s=poll_interval,
+                **stats,
+            )
 
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=poll_interval)
