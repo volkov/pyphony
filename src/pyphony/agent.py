@@ -107,8 +107,11 @@ class AgentRunner:
                 self._prompt_template, issue, attempt=attempt, comments=comments
             )
 
-            # 5. Build SDK options
+            # 5. Build SDK options (restrict tools for plan-only issues)
             codex = self._config.codex
+            plan_required = "plan required" in [
+                label.lower() for label in issue.labels
+            ]
 
             # 5b. Open stderr log file
             stderr_path = os.path.join(
@@ -117,10 +120,26 @@ class AgentRunner:
             stderr_file = open(stderr_path, "w")
 
             try:
+                # For "plan required" issues, restrict to read-only tools
+                if plan_required:
+                    plan_allowed_tools = [
+                        t for t in (codex.allowed_tools or [])
+                        if t in ("Read", "Glob", "Grep", "Agent", "WebSearch", "WebFetch")
+                    ]
+                    # Ensure at least the core read tools are available
+                    for tool in ("Read", "Glob", "Grep"):
+                        if tool not in plan_allowed_tools:
+                            plan_allowed_tools.append(tool)
+                    effective_allowed_tools = plan_allowed_tools
+                    effective_permission_mode = "plan"
+                else:
+                    effective_allowed_tools = codex.allowed_tools
+                    effective_permission_mode = codex.permission_mode
+
                 options = ClaudeAgentOptions(
                     cwd=workspace.path,
-                    permission_mode=codex.permission_mode,
-                    allowed_tools=codex.allowed_tools,
+                    permission_mode=effective_permission_mode,
+                    allowed_tools=effective_allowed_tools,
                     disallowed_tools=codex.disallowed_tools if codex.disallowed_tools else None,
                     model=codex.model,
                     max_turns=codex.max_turns or self._config.agent.max_turns,

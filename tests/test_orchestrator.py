@@ -1164,6 +1164,144 @@ class TestAutomergeOnDone:
             assert mock_merge.call_count == 2
 
 
+class TestPlanRequired:
+    """Tests for the 'plan required' label flow in _on_worker_exit."""
+
+    @pytest.mark.asyncio
+    async def test_plan_required_swaps_labels_and_transitions_backlog(self, tmp_path):
+        """With 'plan required' label, labels are swapped and issue goes to Backlog."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my plan [DONE]")
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["plan required"],
+                add_labels=["with plan"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_merge.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_plan_required_case_insensitive(self, tmp_path):
+        """'Plan Required' label matching is case-insensitive."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["Plan Required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_labels.assert_called_once()
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+    @pytest.mark.asyncio
+    async def test_plan_required_label_swap_failure_still_transitions(self, tmp_path):
+        """Even if label swap fails, issue still transitions to Backlog."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, side_effect=Exception("API error")), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan done [DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+    @pytest.mark.asyncio
+    async def test_plan_required_no_automerge(self, tmp_path):
+        """Plan required should not trigger automerge."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock) as mock_pr:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_pr.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_plan_required_no_exit_on_merge(self, tmp_path):
+        """Plan required should NOT trigger exit-on-merge (Backlog != Done)."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue = _make_issue()
+        issue.labels = ["plan required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert not orch.merge_detected
+        assert not orch.merge_detected_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_plan_required_takes_priority_over_review_required(self, tmp_path):
+        """When both 'plan required' and 'review required' labels are present,
+        'plan required' should take priority."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required", "review required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_labels.assert_called_once()
+            mock_transition.assert_called_once_with(issue.id, "Backlog")
+
+
 class TestGracefulDrain:
     """Tests for graceful drain on exit-on-merge."""
 

@@ -88,3 +88,28 @@ class TestRenderPrompt:
         issue = _make_issue()
         result = render_prompt("Hello {{ issue.identifier }}", issue, comments=None)
         assert "Previous comments" not in result
+
+    def test_plan_required_label_appends_plan_instructions(self) -> None:
+        issue = _make_issue(labels=["plan required"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "Work on ENG-123" in result
+        assert "plan required" in result
+        assert "НЕ" in result  # "Do NOT write code"
+        assert "[DONE]" in result
+
+    def test_plan_required_case_insensitive(self) -> None:
+        issue = _make_issue(labels=["Plan Required"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "plan required" in result
+
+    def test_no_plan_suffix_without_label(self) -> None:
+        issue = _make_issue(labels=["backend", "urgent"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "plan required" not in result
+
+    def test_plan_required_with_comments(self) -> None:
+        issue = _make_issue(labels=["plan required"])
+        comments = [{"user": "Alice", "created_at": "2025-01-01", "body": "context"}]
+        result = render_prompt("{{ issue.identifier }}", issue, comments=comments)
+        assert "Alice" in result
+        assert "plan required" in result
