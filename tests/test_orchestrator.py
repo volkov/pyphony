@@ -1202,8 +1202,8 @@ class TestAutomergeOnDone:
             mock_transition.assert_called_once_with(issue.id, "Done")
 
     @pytest.mark.asyncio
-    async def test_automerge_failure_adds_conflict_label_and_transitions_backlog(self, tmp_path):
-        """When automerge fails (merged=False), issue gets resolve-conflict label and goes to Backlog."""
+    async def test_automerge_failure_adds_conflict_label_and_transitions_in_review(self, tmp_path):
+        """When automerge fails (merged=False), issue gets resolve-conflict label and goes to In Review."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1221,7 +1221,7 @@ class TestAutomergeOnDone:
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
             mock_labels.assert_called_once_with(
                 issue.id,
                 remove_labels=[],
@@ -1303,8 +1303,8 @@ class TestPlanRequired:
     """Tests for the 'plan required' label flow in _on_worker_exit."""
 
     @pytest.mark.asyncio
-    async def test_plan_required_swaps_labels_and_transitions_backlog(self, tmp_path):
-        """With 'plan required' label, labels are swapped and issue goes to Backlog."""
+    async def test_plan_required_swaps_labels_and_transitions_in_review(self, tmp_path):
+        """With 'plan required' label, labels are swapped and issue goes to In Review."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1326,7 +1326,7 @@ class TestPlanRequired:
                 remove_labels=["plan required"],
                 add_labels=["with plan"],
             )
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
             mock_merge.assert_not_called()
 
     @pytest.mark.asyncio
@@ -1348,7 +1348,7 @@ class TestPlanRequired:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
             mock_labels.assert_called_once()
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
     @pytest.mark.asyncio
     async def test_plan_required_hyphenated_label(self, tmp_path):
@@ -1369,11 +1369,11 @@ class TestPlanRequired:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan [DONE]")
 
             mock_labels.assert_called_once()
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
     @pytest.mark.asyncio
     async def test_plan_required_label_swap_failure_still_transitions(self, tmp_path):
-        """Even if label swap fails, issue still transitions to Backlog."""
+        """Even if label swap fails, issue still transitions to In Review."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1389,7 +1389,7 @@ class TestPlanRequired:
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan done [DONE]")
 
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
     @pytest.mark.asyncio
     async def test_plan_required_no_automerge(self, tmp_path):
@@ -1414,7 +1414,7 @@ class TestPlanRequired:
 
     @pytest.mark.asyncio
     async def test_plan_required_no_exit_on_merge(self, tmp_path):
-        """Plan required should NOT trigger exit-on-merge (Backlog != Done)."""
+        """Plan required should NOT trigger exit-on-merge (In Review != Done)."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1437,7 +1437,7 @@ class TestPlanRequired:
 
     @pytest.mark.asyncio
     async def test_plan_required_transitions_without_done_marker(self, tmp_path):
-        """Plan-required issue transitions to Backlog on normal exit even without [DONE] marker."""
+        """Plan-required issue transitions to In Review on normal exit even without [DONE] marker."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1458,7 +1458,7 @@ class TestPlanRequired:
                 remove_labels=["plan required"],
                 add_labels=["with plan"],
             )
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
         # Claim should be released to prevent re-dispatch
         assert issue.id not in orch.state.claimed
@@ -1506,15 +1506,15 @@ class TestPlanRequired:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
             mock_labels.assert_called_once()
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
 
 class TestResolveConflict:
     """Tests for the 'resolve-conflict' label flow."""
 
     @pytest.mark.asyncio
-    async def test_merge_conflict_sets_label_and_backlog(self, tmp_path):
-        """When automerge returns False, resolve-conflict label is added and issue goes to Backlog."""
+    async def test_merge_conflict_sets_label_and_in_review(self, tmp_path):
+        """When automerge returns False, resolve-conflict label is added and issue goes to In Review."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1537,7 +1537,7 @@ class TestResolveConflict:
                 remove_labels=[],
                 add_labels=["resolve-conflict"],
             )
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
 
     @pytest.mark.asyncio
     async def test_merge_conflict_posts_comment_with_pr_url(self, tmp_path):
@@ -1566,7 +1566,7 @@ class TestResolveConflict:
 
     @pytest.mark.asyncio
     async def test_merge_conflict_no_exit_on_merge(self, tmp_path):
-        """Merge conflict should NOT trigger exit-on-merge (Backlog != Done)."""
+        """Merge conflict should NOT trigger exit-on-merge (In Review != Done)."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1666,7 +1666,7 @@ class TestResolveConflict:
 
     @pytest.mark.asyncio
     async def test_resolve_conflict_agent_merge_still_fails(self, tmp_path):
-        """If merge still fails after resolve, re-add label and go to Backlog."""
+        """If merge still fails after resolve, re-add label and go to In Review."""
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -1684,7 +1684,7 @@ class TestResolveConflict:
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Resolved [DONE]")
 
-            mock_transition.assert_called_once_with(issue.id, "Backlog")
+            mock_transition.assert_called_once_with(issue.id, "In Review")
             # Label removed first, then re-added
             assert mock_labels.call_count == 2
             # First call: remove label
