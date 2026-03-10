@@ -6,9 +6,10 @@ Usage:
     If no workflow files are given, all *.md files in the workflows/ directory
     are used automatically.
 
-Loop (per workflow):
+Loop:
     1. git pull --rebase
-    2. uv run python -m pyphony run <workflow> --exit-on-merge [extra args]
+    2. uv run python -m pyphony run <workflow1> <workflow2> ... --exit-on-merge [extra args]
+       (single process handles all workflows concurrently)
     3. If process exits with code 10 (merge detected) → restart from step 1
     4. If process exits with 0 or signal → stop
 """
@@ -82,11 +83,11 @@ def _uv_sync() -> bool:
         return False
 
 
-def _run_app(workflow_file: str, extra_args: list[str]) -> subprocess.Popen:
-    """Start pyphony with --exit-on-merge. Returns the Popen process."""
+def _run_app(workflow_files: list[str], extra_args: list[str]) -> subprocess.Popen:
+    """Start a single pyphony process with all workflow files and --exit-on-merge."""
     cmd = [
         sys.executable, "-m", "pyphony",
-        "run", workflow_file,
+        "run", *workflow_files,
         "--exit-on-merge",
         *extra_args,
     ]
@@ -164,49 +165,36 @@ def main() -> None:
         if not _running:
             break
 
-        # Step 2: start all workflows in parallel
-        processes: dict[str, subprocess.Popen] = {}
-        for wf in workflow_files:
-            processes[wf] = _run_app(wf, extra)
+        # Step 2: start a single process with all workflow files
+        proc = _run_app(workflow_files, extra)
 
-        # Step 3: wait for all processes, collect exit codes
-        merge_detected = False
-        any_error = False
-        while processes and _running:
-            for wf, proc in list(processes.items()):
-                ret = proc.poll()
-                if ret is not None:
-                    processes.pop(wf)
-                    if ret == EXIT_CODE_MERGE:
-                        print(f"[pyphony-sv] merge detected in {wf} (exit code 10)")
-                        merge_detected = True
-                    elif ret == 0:
-                        print(f"[pyphony-sv] {wf} exited cleanly")
-                    else:
-                        print(f"[pyphony-sv] {wf} exited with code {ret}")
-                        any_error = True
-            if processes:
-                time.sleep(0.5)
+        # Step 3: wait for the process to exit
+        while _running:
+            ret = proc.poll()
+            if ret is not None:
+                break
+            time.sleep(0.5)
 
         if not _running:
-            # Terminate remaining processes
-            for wf, proc in processes.items():
-                proc.terminate()
-            for wf, proc in processes.items():
+            # Terminate process on signal
+            proc.terminate()
+            try:
                 proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
             break
 
-        if merge_detected:
-            print("[pyphony-sv] merge detected, pulling and restarting all workflows...")
+        if ret == EXIT_CODE_MERGE:
+            print("[pyphony-sv] merge detected (exit code 10), pulling and restarting...")
             continue
-        elif any_error:
-            print("[pyphony-sv] error detected, restarting in 5s...")
+        elif ret != 0:
+            print(f"[pyphony-sv] process exited with code {ret}, restarting in 5s...")
             for _ in range(50):  # 5 seconds in 0.1s increments
                 if not _running:
                     break
                 time.sleep(0.1)
         else:
-            print("[pyphony-sv] all workflows exited cleanly, stopping supervisor")
+            print("[pyphony-sv] process exited cleanly, stopping supervisor")
             break
 
     print("[pyphony-sv] supervisor stopped")

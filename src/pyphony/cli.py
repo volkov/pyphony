@@ -64,19 +64,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
     args = parser.parse_args(argv)
 
-    # Default workflow_file
-    if not hasattr(args, "workflow_file") or args.workflow_file is None:
-        args.workflow_file = "WORKFLOW.md"
+    # Default workflow_files
+    if not hasattr(args, "workflow_files") or not args.workflow_files:
+        args.workflow_files = ["WORKFLOW.md"]
+
+    # Backward compat: expose first workflow as workflow_file for subcommands
+    args.workflow_file = args.workflow_files[0]
 
     return args
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "workflow_file",
-        nargs="?",
-        default="WORKFLOW.md",
-        help="Path to WORKFLOW.md (default: WORKFLOW.md)",
+        "workflow_files",
+        nargs="*",
+        default=None,
+        help="Paths to WORKFLOW.md files (default: WORKFLOW.md)",
     )
     parser.add_argument(
         "--port",
