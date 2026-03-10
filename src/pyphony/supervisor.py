@@ -63,6 +63,25 @@ def _git_pull() -> bool:
         return False
 
 
+def _uv_sync() -> bool:
+    """Run uv sync to ensure editable install points to current directory."""
+    try:
+        result = subprocess.run(
+            ["uv", "sync"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode == 0:
+            return True
+        else:
+            print(f"[pyphony-sv] uv sync failed (rc={result.returncode}): {result.stderr.strip()}")
+            return False
+    except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+        print(f"[pyphony-sv] uv sync error: {exc}")
+        return False
+
+
 def _run_app(workflow_file: str, extra_args: list[str]) -> subprocess.Popen:
     """Start pyphony with --exit-on-merge. Returns the Popen process."""
     cmd = [
@@ -138,8 +157,9 @@ def main() -> None:
     print(f"[pyphony-sv] supervisor started (workflows={workflow_files})")
 
     while _running:
-        # Step 1: pull latest code
+        # Step 1: pull latest code and ensure deps are in sync
         _git_pull()
+        _uv_sync()
 
         if not _running:
             break
