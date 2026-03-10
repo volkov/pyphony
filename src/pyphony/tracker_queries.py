@@ -64,6 +64,31 @@ query IssueStatesByIds($ids: [ID!]!, $first: Int!, $after: String) {
 }
 """
 
+ISSUE_UPDATE_STATE_MUTATION = """
+mutation IssueUpdateState($issueId: String!, $stateId: String!) {
+  issueUpdate(id: $issueId, input: { stateId: $stateId }) {
+    success
+    issue { id state { name } }
+  }
+}
+"""
+
+ISSUE_TEAM_QUERY = """
+query IssueTeam($issueId: String!) {
+  issue(id: $issueId) {
+    team { id }
+  }
+}
+"""
+
+WORKFLOW_STATES_QUERY = """
+query WorkflowStates($teamId: ID!) {
+  workflowStates(filter: { team: { id: { eq: $teamId } } }) {
+    nodes { id name }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(

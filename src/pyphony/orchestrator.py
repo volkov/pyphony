@@ -168,24 +168,29 @@ class Orchestrator:
                     issue_identifier=issue.identifier,
                     error=getattr(result, "error", None),
                 )
-                self._on_worker_exit(
-                    issue.id, normal=False, error=getattr(result, "error", "agent_failed")
+                await self._on_worker_exit(
+                    issue.id, normal=False, error=getattr(result, "error", "agent_failed"),
+                    result=getattr(result, "result", None),
                 )
             else:
-                self._on_worker_exit(issue.id, normal=True, error=None)
+                await self._on_worker_exit(
+                    issue.id, normal=True, error=None,
+                    result=getattr(result, "result", None),
+                )
         except Exception as exc:
             log.error(
                 "worker_failed",
                 issue_identifier=issue.identifier,
                 error=str(exc),
             )
-            self._on_worker_exit(issue.id, normal=False, error=str(exc))
+            await self._on_worker_exit(issue.id, normal=False, error=str(exc))
 
-    def _on_worker_exit(
+    async def _on_worker_exit(
         self,
         issue_id: str,
         normal: bool,
         error: str | None,
+        result: str | None = None,
     ) -> None:
         entry = self._state.running.pop(issue_id, None)
         if entry is None:
@@ -210,6 +215,22 @@ class Orchestrator:
             input_tokens=session.agent_input_tokens,
             output_tokens=session.agent_output_tokens,
         )
+
+        # Transition issue to Done if agent signaled completion
+        if normal and result and "[DONE]" in result:
+            try:
+                await self._tracker.transition_issue(issue_id, "Done")
+                log.info(
+                    "issue_transitioned",
+                    issue_identifier=entry.issue.identifier,
+                    target_state="Done",
+                )
+            except Exception as exc:
+                log.warning(
+                    "issue_transition_failed",
+                    issue_identifier=entry.issue.identifier,
+                    error=str(exc),
+                )
 
         current_attempt = entry.attempt.attempt or 0
         max_runs = self._config.agent.max_runs
@@ -359,7 +380,7 @@ class Orchestrator:
                         issue_identifier=entry.issue.identifier,
                     )
                     await self._kill_worker(issue_id)
-                    self._on_worker_exit(issue_id, normal=False, error="stall_timeout")
+                    await self._on_worker_exit(issue_id, normal=False, error="stall_timeout")
 
         running_ids = list(self._state.running.keys())
         if not running_ids:

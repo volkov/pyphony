@@ -8,7 +8,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-import httpx
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKError,
@@ -19,8 +18,6 @@ from claude_agent_sdk import (
 )
 
 import structlog
-
-from pyphony.linear_tool import create_linear_tool
 
 from pyphony.models import (
     Issue,
@@ -91,16 +88,6 @@ class AgentRunner:
 
             # 4. Build SDK options
             codex = self._config.codex
-            mcp_servers = {}
-            http_client: httpx.AsyncClient | None = None
-            tracker = self._config.tracker
-            if tracker.kind == "linear" and tracker.api_key:
-                http_client = httpx.AsyncClient(timeout=30.0)
-                mcp_servers["linear"] = create_linear_tool(
-                    endpoint=tracker.endpoint,
-                    api_key=tracker.api_key,
-                    http_client=http_client,
-                )
 
             # 4b. Open stderr log file
             stderr_path = os.path.join(
@@ -118,7 +105,6 @@ class AgentRunner:
                     max_turns=codex.max_turns or self._config.agent.max_turns,
                     system_prompt=codex.system_prompt,
                     cli_path=codex.command if codex.command != "claude" else None,
-                    mcp_servers=mcp_servers or None,
                     stderr=lambda line: stderr_file.write(line + "\n"),
                 )
 
@@ -133,11 +119,10 @@ class AgentRunner:
                     max_turns=options.max_turns,
                     system_prompt_len=len(codex.system_prompt) if codex.system_prompt else 0,
                     cli_path=options.cli_path,
-                    mcp_servers=list(mcp_servers.keys()) if mcp_servers else [],
                     prompt_len=len(prompt),
                 )
 
-                # 5. Run query (SDK keeps stdin open for MCP servers automatically)
+                # 5. Run query
                 # Remove CLAUDECODE to allow launching from within a Claude Code session
                 os.environ.pop("CLAUDECODE", None)
                 async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
@@ -149,6 +134,7 @@ class AgentRunner:
                             run_attempt.transcript_path = _transcript_path(
                                 workspace.path, message.session_id
                             )
+                            run_attempt.result = message.result
                             if message.is_error:
                                 run_attempt.status = "failed"
                                 run_attempt.error = message.result or "agent_error"
@@ -159,8 +145,6 @@ class AgentRunner:
                 await self._workspace_mgr.run_after_run(workspace.path)
             finally:
                 stderr_file.close()
-                if http_client:
-                    await http_client.aclose()
 
         except TimeoutError:
             run_attempt.status = "failed"

@@ -337,6 +337,132 @@ class TestFetchIssueStatesByIds:
         assert result == {"id-1": "Done", "id-2": "Todo"}
 
 
+def _issue_team_response(team_id="team-1"):
+    return httpx.Response(
+        200,
+        json={
+            "data": {
+                "issue": {
+                    "team": {"id": team_id},
+                }
+            }
+        },
+    )
+
+
+def _workflow_states_response(states):
+    return httpx.Response(
+        200,
+        json={
+            "data": {
+                "workflowStates": {
+                    "nodes": states,
+                }
+            }
+        },
+    )
+
+
+class TestFetchWorkflowStates:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_returns_name_to_id_mapping(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                _issue_team_response(),
+                _workflow_states_response([
+                    {"id": "state-1", "name": "Todo"},
+                    {"id": "state-2", "name": "In Progress"},
+                    {"id": "state-3", "name": "Done"},
+                ]),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.fetch_workflow_states(issue_id="issue-1")
+        finally:
+            await client.close()
+
+        assert result == {
+            "Todo": "state-1",
+            "In Progress": "state-2",
+            "Done": "state-3",
+        }
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_caches_after_first_call(self):
+        route = respx.post(ENDPOINT).mock(
+            side_effect=[
+                _issue_team_response(),
+                _workflow_states_response([{"id": "s1", "name": "Todo"}]),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            await client.fetch_workflow_states(issue_id="issue-1")
+            await client.fetch_workflow_states(issue_id="issue-1")
+        finally:
+            await client.close()
+
+        # 2 calls for first fetch (issue team + workflow states), 0 for second (cached)
+        assert route.call_count == 2
+
+
+class TestTransitionIssue:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_successful_transition(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                # First call: fetch issue team
+                _issue_team_response(),
+                # Second call: fetch workflow states
+                _workflow_states_response([{"id": "state-done", "name": "Done"}]),
+                # Third call: issue update
+                httpx.Response(
+                    200,
+                    json={
+                        "data": {
+                            "issueUpdate": {
+                                "success": True,
+                                "issue": {"id": "issue-1", "state": {"name": "Done"}},
+                            }
+                        }
+                    },
+                ),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.transition_issue("issue-1", "Done")
+        finally:
+            await client.close()
+
+        assert result is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_unknown_state_returns_false(self):
+        respx.post(ENDPOINT).mock(
+            side_effect=[
+                _issue_team_response(),
+                _workflow_states_response([{"id": "s1", "name": "Todo"}]),
+            ]
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.transition_issue("issue-1", "Nonexistent")
+        finally:
+            await client.close()
+
+        assert result is False
+
+
 class TestErrorHandling:
     @respx.mock
     @pytest.mark.asyncio

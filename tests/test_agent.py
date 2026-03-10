@@ -94,6 +94,20 @@ class TestAgentRunner:
         assert result.issue_identifier == "TEST-1"
         assert result.attempt == 1
         assert result.workspace_path != ""
+        assert result.result == "Done"
+
+    @pytest.mark.asyncio
+    @patch("pyphony.agent.query")
+    async def test_result_captured_on_error(self, mock_query, service_config, issue):
+        async def fake_query(**kwargs):
+            yield _result_message(is_error=True, result="Something went wrong")
+
+        mock_query.side_effect = fake_query
+        runner = _make_runner(service_config)
+        result = await runner.run(issue, attempt=1)
+
+        assert result.status == "failed"
+        assert result.result == "Something went wrong"
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")

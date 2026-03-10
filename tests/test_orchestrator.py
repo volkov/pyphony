@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
@@ -9,6 +10,8 @@ from pyphony.models import (
     BlockerRef,
     CodexConfig,
     Issue,
+    RunAttempt,
+    RunningEntry,
     ServiceConfig,
     TrackerConfig,
     WorkspaceConfig,
@@ -88,6 +91,18 @@ def _issue_node(id="id-1", identifier="PROJ-1", title="Test", state_name="Todo",
     }
 
 
+def _running_entry(issue, attempt=0):
+    return RunningEntry(
+        issue=issue,
+        attempt=RunAttempt(
+            issue_id=issue.id,
+            issue_identifier=issue.identifier,
+            started_at=datetime.now(timezone.utc),
+            attempt=attempt,
+        ),
+    )
+
+
 class TestDispatchEligibility:
     def test_claimed_not_re_dispatched(self, tmp_path):
         config = _make_config(tmp_path)
@@ -107,11 +122,7 @@ class TestDispatchEligibility:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(issue_id=issue.id, issue_identifier=issue.identifier),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
 
         assert not orch._is_dispatch_eligible(issue)
 
@@ -165,13 +176,9 @@ class TestConcurrency:
         ws_mgr = WorkspaceManager(config)
         orch = Orchestrator(config, tracker, ws_mgr)
 
-        from pyphony.models import RunAttempt, RunningEntry
         for i in range(2):
             issue = _make_issue(id=f"id-{i}", identifier=f"PROJ-{i}")
-            orch.state.running[issue.id] = RunningEntry(
-                issue=issue,
-                attempt=RunAttempt(issue_id=issue.id, issue_identifier=issue.identifier),
-            )
+            orch.state.running[issue.id] = _running_entry(issue)
 
         assert orch._available_slots("Todo") == 0
 
@@ -187,12 +194,8 @@ class TestConcurrency:
         ws_mgr = WorkspaceManager(config)
         orch = Orchestrator(config, tracker, ws_mgr)
 
-        from pyphony.models import RunAttempt, RunningEntry
         issue = _make_issue(id="id-0", state="Todo")
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(issue_id=issue.id, issue_identifier=issue.identifier),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
 
         assert orch._available_slots("Todo") == 0
         assert orch._available_slots("In Progress") > 0
@@ -230,103 +233,131 @@ class TestPollTick:
 
 
 class TestRetry:
-    def test_normal_exit_releases_claim_default_max_runs(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_normal_exit_releases_claim_default_max_runs(self, tmp_path):
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        orch._on_worker_exit(issue.id, normal=True, error=None)
+        await orch._on_worker_exit(issue.id, normal=True, error=None)
 
         assert issue.id not in orch.state.retry_attempts
         assert issue.id not in orch.state.claimed
 
-    def test_abnormal_exit_releases_claim_default_max_runs(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_abnormal_exit_releases_claim_default_max_runs(self, tmp_path):
         config = _make_config(tmp_path)
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        orch._on_worker_exit(issue.id, normal=False, error="crash")
+        await orch._on_worker_exit(issue.id, normal=False, error="crash")
 
         assert issue.id not in orch.state.retry_attempts
         assert issue.id not in orch.state.claimed
 
-    def test_max_runs_allows_retries(self, tmp_path):
+    @pytest.mark.asyncio
+    async def test_max_runs_allows_retries(self, tmp_path):
         config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=3))
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
 
         # First run (attempt=0) → should schedule retry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue, attempt=0)
         orch.state.claimed.add(issue.id)
-        orch._on_worker_exit(issue.id, normal=True, error=None)
+        await orch._on_worker_exit(issue.id, normal=True, error=None)
         assert issue.id in orch.state.retry_attempts
         assert orch.state.retry_attempts[issue.id].attempt == 1
 
         # Second run (attempt=1) → should schedule retry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-                attempt=1,
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue, attempt=1)
         orch.state.retry_attempts.pop(issue.id, None)
-        orch._on_worker_exit(issue.id, normal=False, error="crash")
+        await orch._on_worker_exit(issue.id, normal=False, error="crash")
         assert issue.id in orch.state.retry_attempts
         assert orch.state.retry_attempts[issue.id].attempt == 2
 
         # Third run (attempt=2) → should release (max_runs=3 reached)
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-                attempt=2,
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue, attempt=2)
         orch.state.retry_attempts.pop(issue.id, None)
-        orch._on_worker_exit(issue.id, normal=True, error=None)
+        await orch._on_worker_exit(issue.id, normal=True, error=None)
         assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
+
+
+class TestIssueTransition:
+    @pytest.mark.asyncio
+    async def test_done_marker_triggers_transition(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_no_done_marker_no_transition(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Finished work")
+            mock_transition.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_failed_run_no_transition(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=False, error="crash", result="[DONE]")
+            mock_transition.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_transition_failure_does_not_crash(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "transition_issue", new_callable=AsyncMock, side_effect=Exception("API down")):
+            # Should not raise
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert issue.id not in orch.state.running
         assert issue.id not in orch.state.claimed
 
 
@@ -351,15 +382,7 @@ class TestReconciliation:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
         (tmp_path / "PROJ-1").mkdir()
@@ -393,15 +416,7 @@ class TestReconciliation:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue(state="Todo")
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
 
         respx.post(ENDPOINT).mock(
             return_value=httpx.Response(
@@ -432,15 +447,7 @@ class TestReconciliation:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime.now(timezone.utc),
-            ),
-        )
+        orch.state.running[issue.id] = _running_entry(issue)
 
         respx.post(ENDPOINT).mock(side_effect=httpx.ConnectError("fail"))
 
@@ -463,15 +470,9 @@ class TestStallDetection:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            ),
-        )
+        entry = _running_entry(issue)
+        entry.attempt.started_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        orch.state.running[issue.id] = entry
 
         respx.post(ENDPOINT).mock(
             return_value=httpx.Response(
@@ -504,15 +505,9 @@ class TestStallDetection:
         orch = Orchestrator(config, tracker, ws_mgr)
 
         issue = _make_issue()
-        from pyphony.models import RunAttempt, RunningEntry
-        orch.state.running[issue.id] = RunningEntry(
-            issue=issue,
-            attempt=RunAttempt(
-                issue_id=issue.id,
-                issue_identifier=issue.identifier,
-                started_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
-            ),
-        )
+        entry = _running_entry(issue)
+        entry.attempt.started_at = datetime(2020, 1, 1, tzinfo=timezone.utc)
+        orch.state.running[issue.id] = entry
 
         respx.post(ENDPOINT).mock(
             return_value=httpx.Response(

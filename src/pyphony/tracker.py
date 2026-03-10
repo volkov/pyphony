@@ -14,11 +14,18 @@ from .errors import (
     LinearUnknownPayload,
 )
 from .models import BlockerRef, Issue, ServiceConfig
+import structlog
+
 from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
     ISSUE_STATES_BY_IDS_QUERY,
+    ISSUE_TEAM_QUERY,
+    ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
+    WORKFLOW_STATES_QUERY,
 )
+
+log = structlog.stdlib.get_logger()
 
 _PAGE_SIZE = 50
 
@@ -33,6 +40,7 @@ class LinearClient:
         self._active_states = config.tracker.active_states
         self._terminal_states = config.tracker.terminal_states
         self._client = httpx.AsyncClient(timeout=30.0)
+        self._workflow_states: dict[str, str] | None = None
 
     # ------------------------------------------------------------------
     # Public methods
@@ -94,6 +102,64 @@ class LinearClient:
             "first": _PAGE_SIZE,
         }
         return await self._paginate(ISSUES_BY_STATES_QUERY, variables)
+
+    async def fetch_workflow_states(self, issue_id: str | None = None) -> dict[str, str]:
+        """Return ``{state_name: state_id}``, cached after first call.
+
+        Requires *issue_id* on the first call to resolve the team.
+        """
+        if self._workflow_states is not None:
+            return self._workflow_states
+
+        if not issue_id:
+            raise LinearUnknownPayload(
+                "issue_id is required to resolve workflow states on first call"
+            )
+
+        # Step 1: resolve team ID from an issue
+        issue_data = await self._execute(
+            ISSUE_TEAM_QUERY,
+            {"issueId": issue_id},
+        )
+        issue_node = issue_data.get("issue")
+        if not issue_node:
+            raise LinearUnknownPayload(
+                f"Issue '{issue_id}' not found"
+            )
+        team = issue_node.get("team")
+        if not team or not team.get("id"):
+            raise LinearUnknownPayload(
+                f"No team found for issue '{issue_id}'"
+            )
+        team_id = team["id"]
+
+        # Step 2: fetch workflow states for that team
+        data = await self._execute(
+            WORKFLOW_STATES_QUERY,
+            {"teamId": team_id},
+        )
+        nodes = data.get("workflowStates", {}).get("nodes", [])
+        self._workflow_states = {n["name"]: n["id"] for n in nodes}
+        return self._workflow_states
+
+    async def transition_issue(self, issue_id: str, target_state: str) -> bool:
+        """Transition an issue to *target_state*. Returns True on success."""
+        states = await self.fetch_workflow_states(issue_id=issue_id)
+        state_id = states.get(target_state)
+        if not state_id:
+            log.warning(
+                "transition_state_not_found",
+                target_state=target_state,
+                available=list(states.keys()),
+            )
+            return False
+
+        data = await self._execute(
+            ISSUE_UPDATE_STATE_MUTATION,
+            {"issueId": issue_id, "stateId": state_id},
+        )
+        success = data.get("issueUpdate", {}).get("success", False)
+        return success
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""
