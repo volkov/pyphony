@@ -31,3 +31,25 @@ class TestParseArgs:
         assert args.workflow_file == "custom.md"
         assert args.port == 3000
         assert args.log_level == "WARNING"
+
+    def test_create_issue_subcommand(self):
+        args = parse_args(["create-issue", "--title", "Test task"])
+        assert args.command == "create-issue"
+        assert args.title == "Test task"
+        assert args.description is None
+        assert args.workflow_file == "WORKFLOW.md"
+
+    def test_create_issue_with_description(self):
+        args = parse_args([
+            "create-issue", "--title", "Test", "--description", "Details here",
+            "custom.md",
+        ])
+        assert args.command == "create-issue"
+        assert args.title == "Test"
+        assert args.description == "Details here"
+        assert args.workflow_file == "custom.md"
+
+    def test_run_subcommand_explicit(self):
+        args = parse_args(["run", "my_workflow.md"])
+        assert args.command == "run"
+        assert args.workflow_file == "my_workflow.md"

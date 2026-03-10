@@ -19,10 +19,12 @@ import structlog
 from .tracker_queries import (
     CANDIDATE_ISSUES_QUERY,
     COMMENT_CREATE_MUTATION,
+    ISSUE_CREATE_MUTATION,
     ISSUE_STATES_BY_IDS_QUERY,
     ISSUE_TEAM_QUERY,
     ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
+    PROJECT_TEAMS_QUERY,
     WORKFLOW_STATES_QUERY,
 )
 
@@ -169,6 +171,70 @@ class LinearClient:
             {"issueId": issue_id, "body": body},
         )
         return data.get("commentCreate", {}).get("success", False)
+
+    async def create_issue(
+        self,
+        title: str,
+        description: str | None = None,
+    ) -> dict[str, str]:
+        """Create an issue in Backlog state. Returns dict with id, identifier, title, url."""
+        # Step 1: resolve project ID and team ID from project slug
+        proj_data = await self._execute(
+            PROJECT_TEAMS_QUERY,
+            {"projectSlug": self._project_slug},
+        )
+        projects = proj_data.get("projects", {}).get("nodes", [])
+        if not projects:
+            raise LinearUnknownPayload(
+                f"Project with slug '{self._project_slug}' not found"
+            )
+        project = projects[0]
+        project_id = project["id"]
+
+        teams = project.get("teams", {}).get("nodes", [])
+        if not teams:
+            raise LinearUnknownPayload(
+                f"No teams found for project '{self._project_slug}'"
+            )
+        team_id = teams[0]["id"]
+
+        # Step 2: resolve Backlog state ID for the team
+        states_data = await self._execute(
+            WORKFLOW_STATES_QUERY,
+            {"teamId": team_id},
+        )
+        states = {
+            n["name"]: n["id"]
+            for n in states_data.get("workflowStates", {}).get("nodes", [])
+        }
+        backlog_state_id = states.get("Backlog")
+        if not backlog_state_id:
+            raise LinearUnknownPayload(
+                f"Backlog state not found; available states: {list(states.keys())}"
+            )
+
+        # Step 3: create the issue
+        variables: dict = {
+            "teamId": team_id,
+            "title": title,
+            "projectId": project_id,
+            "stateId": backlog_state_id,
+        }
+        if description:
+            variables["description"] = description
+
+        data = await self._execute(ISSUE_CREATE_MUTATION, variables)
+        result = data.get("issueCreate", {})
+        if not result.get("success"):
+            raise LinearUnknownPayload("issueCreate returned success=false")
+
+        issue = result.get("issue", {})
+        return {
+            "id": issue.get("id", ""),
+            "identifier": issue.get("identifier", ""),
+            "title": issue.get("title", ""),
+            "url": issue.get("url", ""),
+        }
 
     async def close(self) -> None:
         """Close the underlying HTTP client."""

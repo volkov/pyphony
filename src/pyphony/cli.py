@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue"}
+
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -28,13 +30,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     check_parser.add_argument("issue_identifier", help="Issue identifier (e.g. SER-19)")
     _add_common_args(check_parser)
 
-    # For backward compat: if no subcommand, treat positional arg as workflow_file
-    parser.add_argument(
-        "workflow_file",
-        nargs="?",
-        default=None,
-        help="Path to WORKFLOW.md (default: WORKFLOW.md)",
+    # Create issue
+    create_parser = subparsers.add_parser(
+        "create-issue", help="Create a new issue in Linear (Backlog state)"
     )
+    create_parser.add_argument("--title", required=True, help="Issue title")
+    create_parser.add_argument("--description", default=None, help="Issue description (markdown)")
+    _add_common_args(create_parser)
+
+    # Backward compat: if first arg is not a known subcommand, insert "run"
+    # so that e.g. `pyphony my_workflow.md` or `pyphony --port 8080` works
+    if argv is None:
+        argv = sys.argv[1:]
+    if not argv or argv[0] not in _SUBCOMMANDS:
+        argv = ["run"] + argv
 
     args = parser.parse_args(argv)
 
@@ -86,6 +95,9 @@ def main() -> None:
     elif args.command == "check-issue":
         from .candidates import check_issue
         check_issue(args)
+    elif args.command == "create-issue":
+        from .create_issue import create_issue
+        create_issue(args)
     else:
         from .service import run_service
         run_service(args)

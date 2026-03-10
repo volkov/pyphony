@@ -98,6 +98,34 @@ mutation CommentCreate($issueId: String!, $body: String!) {
 }
 """
 
+PROJECT_TEAMS_QUERY = """
+query ProjectTeams($projectSlug: String!) {
+  projects(filter: { slugId: { eq: $projectSlug } }) {
+    nodes {
+      id
+      teams {
+        nodes { id name }
+      }
+    }
+  }
+}
+"""
+
+ISSUE_CREATE_MUTATION = """
+mutation IssueCreate($teamId: String!, $title: String!, $description: String, $stateId: String, $projectId: String) {
+  issueCreate(input: { teamId: $teamId, title: $title, description: $description, stateId: $stateId, projectId: $projectId }) {
+    success
+    issue {
+      id
+      identifier
+      title
+      url
+      state { name }
+    }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(
