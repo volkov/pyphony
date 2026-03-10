@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
@@ -790,3 +791,181 @@ class TestStartupCleanup:
 
         await orch.startup_terminal_cleanup()
         await tracker.close()
+
+
+class TestAutomergeOnDone:
+    """Tests for the automerge/review-required flow in _on_worker_exit."""
+
+    @pytest.mark.asyncio
+    async def test_no_review_label_automerges_and_transitions_done(self, tmp_path):
+        """Without 'review required' label, PRs are automerged and issue goes to Done."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/99"]) as mock_pr, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
+
+            mock_pr.assert_called_once_with(issue.id)
+            mock_merge.assert_called_once_with("https://github.com/org/repo/pull/99")
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_review_required_transitions_to_in_review(self, tmp_path):
+        """With 'review required' label, issue transitions to 'In Review'."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["review required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+            mock_merge.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_review_required_case_insensitive(self, tmp_path):
+        """'Review Required' label matching is case-insensitive."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["Review Required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+            mock_merge.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_no_prs_attached_still_transitions_done(self, tmp_path):
+        """When no PRs are attached, issue still transitions to Done."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_automerge_failure_still_transitions_done(self, tmp_path):
+        """Even if automerge fails, issue still transitions to Done."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=False):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_automerge_exception_still_transitions_done(self, tmp_path):
+        """If fetching PR URLs raises, issue still transitions to Done."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, side_effect=Exception("API error")):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_transition.assert_called_once_with(issue.id, "Done")
+
+    @pytest.mark.asyncio
+    async def test_exit_on_merge_not_triggered_for_in_review(self, tmp_path):
+        """exit_on_merge should NOT fire when issue goes to In Review."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue = _make_issue()
+        issue.labels = ["review required"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        assert not orch.merge_detected
+        assert not orch.merge_detected_event.is_set()
+
+    @pytest.mark.asyncio
+    async def test_multiple_prs_all_merged(self, tmp_path):
+        """When multiple PRs are attached, all are merged."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        pr_urls = [
+            "https://github.com/org/repo/pull/1",
+            "https://github.com/org/repo/pull/2",
+        ]
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=pr_urls), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            assert mock_merge.call_count == 2
