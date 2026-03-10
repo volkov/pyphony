@@ -50,7 +50,7 @@ class Orchestrator:
         self._state.poll_interval_ms = config.polling.interval_ms
         self._state.max_concurrent_agents = config.agent.max_concurrent_agents
 
-    async def poll_tick(self) -> None:
+    async def poll_tick(self) -> dict[str, int]:
         await self.reconcile_running_issues()
 
         errors = validate_dispatch_config(self._config)
@@ -79,12 +79,11 @@ class Orchestrator:
             await self._dispatch(issue)
             dispatched += 1
 
-        log.info(
-            "poll_tick_complete",
-            dispatched=dispatched,
-            running=len(self._state.running),
-            retrying=len(self._state.retry_attempts),
-        )
+        return {
+            "dispatched": dispatched,
+            "running": len(self._state.running),
+            "retrying": len(self._state.retry_attempts),
+        }
 
     def _is_dispatch_eligible(self, issue: Issue) -> bool:
         if not issue.id or not issue.identifier or not issue.title or not issue.state:
