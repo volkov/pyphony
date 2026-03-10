@@ -21,6 +21,8 @@ from .normalization import normalize_state, sort_issues_for_dispatch
 from .tracker import LinearClient
 from .workspace import WorkspaceManager
 
+_IN_PROGRESS_STATE = "In Progress"
+
 log = structlog.stdlib.get_logger()
 
 
@@ -142,6 +144,20 @@ class Orchestrator:
         )
 
         self._state.running[issue.id] = entry
+
+        # Transition issue to "In Progress" in Linear if not already
+        if normalize_state(issue.state) != normalize_state(_IN_PROGRESS_STATE):
+            try:
+                await self._tracker.transition_issue(
+                    issue.id, _IN_PROGRESS_STATE
+                )
+                issue.state = _IN_PROGRESS_STATE
+            except Exception as exc:
+                log.warning(
+                    "in_progress_transition_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
 
         reason = "retry" if retry_attempt > 0 else "new_issue"
         log.info(
