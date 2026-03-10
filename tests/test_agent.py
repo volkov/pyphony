@@ -234,6 +234,48 @@ class TestAgentRunner:
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")
+    async def test_on_transcript_called_on_result(self, mock_query, service_config, issue):
+        """on_transcript callback is called when session_id is found in ResultMessage."""
+        transcript_paths = []
+
+        async def on_transcript(path):
+            transcript_paths.append(path)
+
+        async def fake_query(**kwargs):
+            yield _result_message()
+
+        mock_query.side_effect = fake_query
+        runner = _make_runner(service_config)
+        result = await runner.run(issue, attempt=1, on_transcript=on_transcript)
+
+        assert result.status == "completed"
+        assert len(transcript_paths) == 1
+        assert "s1" in transcript_paths[0]  # session_id from _result_message
+
+    @pytest.mark.asyncio
+    @patch("pyphony.agent.query")
+    async def test_on_transcript_called_once_for_early_session_id(self, mock_query, service_config, issue):
+        """on_transcript is called only once even if multiple messages have session_id."""
+        from claude_agent_sdk import SystemMessage
+        transcript_paths = []
+
+        async def on_transcript(path):
+            transcript_paths.append(path)
+
+        async def fake_query(**kwargs):
+            yield SystemMessage(subtype="init", data={"session_id": "early-sid"})
+            yield _result_message()
+
+        mock_query.side_effect = fake_query
+        runner = _make_runner(service_config)
+        result = await runner.run(issue, attempt=1, on_transcript=on_transcript)
+
+        assert result.status == "completed"
+        assert len(transcript_paths) == 1
+        assert "early-sid" in transcript_paths[0]
+
+    @pytest.mark.asyncio
+    @patch("pyphony.agent.query")
     async def test_query_receives_correct_options(self, mock_query, service_config, issue):
         captured_kwargs = {}
 

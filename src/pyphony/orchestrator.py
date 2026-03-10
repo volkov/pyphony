@@ -210,9 +210,32 @@ class Orchestrator:
             entry.worker_task = task
 
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
+        async def _post_transcript_comment(transcript_path: str) -> None:
+            """Post a comment with the transcript link as soon as it's available."""
+            transcript_url = _build_transcript_url(
+                self._config.server.explorer_base_url, transcript_path
+            )
+            if transcript_url:
+                body = f"[Transcript]({transcript_url})"
+                try:
+                    await self._tracker.comment_on_issue(issue.id, body)
+                    log.info(
+                        "transcript_comment_posted",
+                        issue_identifier=issue.identifier,
+                        transcript_url=transcript_url,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "transcript_comment_failed",
+                        issue_identifier=issue.identifier,
+                        error=str(exc),
+                    )
+
         try:
-            result = await self._run_agent_fn(issue, entry.attempt.attempt)
-            transcript_path = getattr(result, "transcript_path", None)
+            result = await self._run_agent_fn(
+                issue, entry.attempt.attempt,
+                on_transcript=_post_transcript_comment,
+            )
             if hasattr(result, "status") and result.status == "failed":
                 log.error(
                     "worker_failed",
@@ -222,13 +245,11 @@ class Orchestrator:
                 await self._on_worker_exit(
                     issue.id, normal=False, error=getattr(result, "error", "agent_failed"),
                     result=getattr(result, "result", None),
-                    transcript_path=transcript_path,
                 )
             else:
                 await self._on_worker_exit(
                     issue.id, normal=True, error=None,
                     result=getattr(result, "result", None),
-                    transcript_path=transcript_path,
                 )
         except Exception as exc:
             log.error(
@@ -244,7 +265,6 @@ class Orchestrator:
         normal: bool,
         error: str | None,
         result: str | None = None,
-        transcript_path: str | None = None,
     ) -> None:
         entry = self._state.running.pop(issue_id, None)
         if entry is None:
@@ -281,17 +301,11 @@ class Orchestrator:
         else:
             comment_body = "Agent completed without producing a result."
 
-        transcript_url = _build_transcript_url(
-            self._config.server.explorer_base_url, transcript_path
-        )
-        if transcript_url:
-            comment_body += f"\n\n---\n[Transcript]({transcript_url})"
         try:
             await self._tracker.comment_on_issue(issue_id, comment_body)
             log.info(
                 "comment_posted",
                 issue_identifier=entry.issue.identifier,
-                transcript_url=transcript_url,
             )
         except Exception as exc:
             log.warning(
