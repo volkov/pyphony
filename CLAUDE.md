@@ -26,6 +26,14 @@ Python implementation of the Symphony Service Specification.
 uv run pytest                        # Run all tests
 uv run pytest tests/test_models.py   # Run specific test file
 uv run python -m pyphony WORKFLOW.md # Start the service
+
+# CLI subcommands (all take WORKFLOW.md as positional arg):
+uv run python -m pyphony list-candidates WORKFLOW.md              # Show dispatchable issues
+uv run python -m pyphony check-issue SER-52 WORKFLOW.md           # Why is/isn't issue dispatched
+uv run python -m pyphony get-issue WORKFLOW.md --identifier SER-52      # Fetch issue from Linear
+uv run python -m pyphony create-issue WORKFLOW.md --title "..." [--description "..."]
+uv run python -m pyphony update-issue WORKFLOW.md --identifier SER-52 [--title/--description/--state]
+uv run python -m pyphony prompt-view SER-52 WORKFLOW.md           # Show rendered prompt for issue
 ```
 
 ## Package Structure
