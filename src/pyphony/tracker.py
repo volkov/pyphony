@@ -21,6 +21,7 @@ from .tracker_queries import (
     COMMENT_CREATE_MUTATION,
     ISSUE_ATTACHMENTS_QUERY,
     ISSUE_BY_IDENTIFIER_QUERY,
+    ISSUE_FULL_BY_IDENTIFIER_QUERY,
     ISSUE_COMMENTS_QUERY,
     ISSUE_CREATE_MUTATION,
     ISSUE_LABEL_CREATE_MUTATION,
@@ -324,6 +325,33 @@ class LinearClient:
             "state": (node.get("state") or {}).get("name", ""),
             "url": node.get("url", ""),
         }
+
+    async def fetch_issue_by_identifier(self, identifier: str) -> Issue:
+        """Fetch an issue by identifier (e.g. SER-27) as a full Issue model."""
+        parts = identifier.upper().rsplit("-", 1)
+        if len(parts) != 2:
+            raise LinearUnknownPayload(f"Invalid identifier format: {identifier}")
+        team_prefix, number_str = parts
+        try:
+            number = int(number_str)
+        except ValueError:
+            raise LinearUnknownPayload(f"Invalid identifier format: {identifier}")
+
+        data = await self._execute(
+            ISSUE_FULL_BY_IDENTIFIER_QUERY,
+            {
+                "filter": {
+                    "team": {"key": {"eq": team_prefix}},
+                    "number": {"eq": number},
+                },
+                "first": 1,
+            },
+        )
+        nodes = data.get("issues", {}).get("nodes", [])
+        if not nodes:
+            raise LinearUnknownPayload(f"Issue {identifier} not found")
+
+        return self._normalize_issue(nodes[0])
 
     async def update_issue(
         self,
