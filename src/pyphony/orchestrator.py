@@ -231,6 +231,21 @@ class Orchestrator:
             output_tokens=session.agent_output_tokens,
         )
 
+        # Post agent's last message as a comment on the issue
+        if result:
+            try:
+                await self._tracker.comment_on_issue(issue_id, result)
+                log.info(
+                    "comment_posted",
+                    issue_identifier=entry.issue.identifier,
+                )
+            except Exception as exc:
+                log.warning(
+                    "comment_post_failed",
+                    issue_identifier=entry.issue.identifier,
+                    error=str(exc),
+                )
+
         # Transition issue to Done if agent signaled completion
         if normal and result and "[DONE]" in result:
             try:

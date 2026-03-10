@@ -89,6 +89,15 @@ query WorkflowStates($teamId: ID!) {
 }
 """
 
+COMMENT_CREATE_MUTATION = """
+mutation CommentCreate($issueId: String!, $body: String!) {
+  commentCreate(input: { issueId: $issueId, body: $body }) {
+    success
+    comment { id body }
+  }
+}
+"""
+
 ISSUES_BY_STATES_QUERY = """
 query IssuesByStates($projectSlug: String!, $stateNames: [String!]!, $first: Int!, $after: String) {
   issues(

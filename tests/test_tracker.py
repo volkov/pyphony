@@ -463,6 +463,58 @@ class TestTransitionIssue:
         assert result is False
 
 
+class TestCommentOnIssue:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_successful_comment(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "commentCreate": {
+                            "success": True,
+                            "comment": {"id": "comment-1", "body": "Agent summary"},
+                        }
+                    }
+                },
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.comment_on_issue("issue-1", "Agent summary")
+        finally:
+            await client.close()
+
+        assert result is True
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_failed_comment_returns_false(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "commentCreate": {
+                            "success": False,
+                            "comment": None,
+                        }
+                    }
+                },
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            result = await client.comment_on_issue("issue-1", "Agent summary")
+        finally:
+            await client.close()
+
+        assert result is False
+
+
 class TestErrorHandling:
     @respx.mock
     @pytest.mark.asyncio

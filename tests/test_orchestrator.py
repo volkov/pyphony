@@ -431,7 +431,8 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
             mock_transition.assert_called_once_with(issue.id, "Done")
 
@@ -446,7 +447,8 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Finished work")
             mock_transition.assert_not_called()
 
@@ -461,7 +463,8 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=False, error="crash", result="[DONE]")
             mock_transition.assert_not_called()
 
@@ -476,12 +479,110 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "transition_issue", new_callable=AsyncMock, side_effect=Exception("API down")):
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, side_effect=Exception("API down")):
             # Should not raise
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
         assert issue.id not in orch.state.running
         assert issue.id not in orch.state.claimed
+
+
+class TestCommentOnExit:
+    @pytest.mark.asyncio
+    async def test_posts_comment_with_result(self, tmp_path):
+        """Agent result is posted as a comment on the issue."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my summary")
+            mock_comment.assert_called_once_with(issue.id, "Here is my summary")
+
+    @pytest.mark.asyncio
+    async def test_no_comment_when_no_result(self, tmp_path):
+        """No comment posted when agent has no result."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock) as mock_comment:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result=None)
+            mock_comment.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_comment_posted_on_failed_run(self, tmp_path):
+        """Comment is posted even when the agent run failed."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+            await orch._on_worker_exit(issue.id, normal=False, error="crash", result="Partial progress")
+            mock_comment.assert_called_once_with(issue.id, "Partial progress")
+
+    @pytest.mark.asyncio
+    async def test_comment_failure_does_not_crash(self, tmp_path):
+        """A failed comment post should not crash the orchestrator."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, side_effect=Exception("API down")):
+            # Should not raise
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Summary [DONE]")
+
+        assert issue.id not in orch.state.running
+        assert issue.id not in orch.state.claimed
+
+    @pytest.mark.asyncio
+    async def test_comment_posted_before_done_transition(self, tmp_path):
+        """Comment is posted and then Done transition happens."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        call_order = []
+
+        async def mock_comment(issue_id, body):
+            call_order.append("comment")
+            return True
+
+        async def mock_transition(issue_id, state):
+            call_order.append("transition")
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=mock_comment), \
+             patch.object(tracker, "transition_issue", side_effect=mock_transition):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
+
+        assert call_order == ["comment", "transition"]
 
 
 class TestReconciliation:
