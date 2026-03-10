@@ -17,6 +17,16 @@ def normalize_state(state: str) -> str:
     return state.strip().lower()
 
 
+def normalize_label(label: str) -> str:
+    """Normalize a label for comparison.
+
+    Converts to lowercase and replaces hyphens/underscores with spaces so that
+    ``"plan-required"``, ``"Plan Required"`` and ``"plan_required"`` all become
+    ``"plan required"``.
+    """
+    return label.strip().lower().replace("-", " ").replace("_", " ")
+
+
 def sort_issues_for_dispatch(issues: list[Issue]) -> list[Issue]:
     def sort_key(issue: Issue) -> tuple:
         priority_key = issue.priority if issue.priority is not None else float("inf")

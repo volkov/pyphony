@@ -102,6 +102,14 @@ class TestRenderPrompt:
         result = render_prompt("Work on {{ issue.identifier }}", issue)
         assert "plan required" in result
 
+    def test_plan_required_hyphenated_label(self) -> None:
+        """'plan-required' (with hyphen) should also trigger plan mode."""
+        issue = _make_issue(labels=["plan-required"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "plan required" in result
+        assert "НЕ" in result
+        assert "[DONE]" in result
+
     def test_no_plan_suffix_without_label(self) -> None:
         issue = _make_issue(labels=["backend", "urgent"])
         result = render_prompt("Work on {{ issue.identifier }}", issue)
