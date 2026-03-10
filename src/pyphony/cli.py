@@ -29,8 +29,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--log-file",
-        default="logs/lifecycle.log",
-        help="Path to lifecycle log file (default: logs/lifecycle.log)",
+        default="logs/pyphony.log",
+        help="Path to log file (default: logs/pyphony.log)",
     )
     return parser.parse_args(argv)
 

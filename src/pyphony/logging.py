@@ -6,32 +6,9 @@ import sys
 
 import structlog
 
-LIFECYCLE_EVENTS = {
-    "dispatch",
-    "agent_start",
-    "agent_finish",
-    "agent_exit",
-    "retry_scheduled",
-    "retry_issue_not_found",
-    "retry_issue_no_longer_eligible",
-    "stall_detected",
-    "worker_failed",
-    "starting_service",
-    "shutdown_requested",
-    "service_stopped",
-}
-
-DEFAULT_LOG_FILE = "logs/lifecycle.log"
+DEFAULT_LOG_FILE = "logs/pyphony.log"
 
 _INTERNAL_KEYS = frozenset({"_from_structlog", "_logger", "_name"})
-
-
-class LifecycleFilter(logging.Filter):
-    """Only pass log records whose structlog event name is in the whitelist."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        event = getattr(record, "_event_dict", {}).get("event", "")
-        return event in LIFECYCLE_EVENTS
 
 
 def _strip_internal_keys(
@@ -45,18 +22,14 @@ def _strip_internal_keys(
 def configure_logging(
     level: str = "INFO", log_file: str | None = DEFAULT_LOG_FILE
 ) -> None:
-    shared_processors: list = [
-        structlog.contextvars.merge_contextvars,
-        structlog.stdlib.add_log_level,
-        structlog.stdlib.add_logger_name,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.StackInfoRenderer(),
-        structlog.processors.format_exc_info,
-    ]
-
     structlog.configure(
         processors=[
-            *shared_processors,
+            structlog.contextvars.merge_contextvars,
+            structlog.stdlib.add_log_level,
+            structlog.stdlib.add_logger_name,
+            structlog.processors.TimeStamper(fmt="iso"),
+            structlog.processors.StackInfoRenderer(),
+            structlog.processors.format_exc_info,
             structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
         ],
         wrapper_class=structlog.stdlib.BoundLogger,
@@ -69,17 +42,17 @@ def configure_logging(
     root.handlers.clear()
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
 
-    # Suppress noisy third-party loggers on console
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("claude_agent_sdk").setLevel(logging.WARNING)
 
+    format_processors = [
+        structlog.stdlib.ExtraAdder(),
+        structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+        _strip_internal_keys,
+    ]
+
     console_formatter = structlog.stdlib.ProcessorFormatter(
-        processors=[
-            structlog.stdlib.ExtraAdder(),
-            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-            _strip_internal_keys,
-            structlog.dev.ConsoleRenderer(),
-        ],
+        processors=[*format_processors, structlog.dev.ConsoleRenderer()],
     )
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.setFormatter(console_formatter)
@@ -89,13 +62,10 @@ def configure_logging(
         os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
         file_formatter = structlog.stdlib.ProcessorFormatter(
             processors=[
-                structlog.stdlib.ExtraAdder(),
-                structlog.stdlib.ProcessorFormatter.remove_processors_meta,
-                _strip_internal_keys,
+                *format_processors,
                 structlog.dev.ConsoleRenderer(colors=False),
             ],
         )
         file_handler = logging.FileHandler(log_file)
         file_handler.setFormatter(file_formatter)
-        file_handler.addFilter(LifecycleFilter())
         root.addHandler(file_handler)
