@@ -103,8 +103,9 @@ class TestServiceConfigFromWorkflow:
 class TestDotenvSupport:
     """Tests for .env file loading via python-dotenv."""
 
-    def test_var_resolved_from_dotenv_file(self, tmp_path):
+    def test_var_resolved_from_dotenv_file(self, tmp_path, monkeypatch):
         """$VAR resolves from .env file when not set in real environment."""
+        monkeypatch.chdir(tmp_path)
         workflow = tmp_path / "WORKFLOW.md"
         workflow.write_text("---\n---\n")
         env_file = tmp_path / ".env"
@@ -124,6 +125,7 @@ class TestDotenvSupport:
 
     def test_real_env_var_overrides_dotenv(self, tmp_path, monkeypatch):
         """Real environment variable takes priority over .env file value."""
+        monkeypatch.chdir(tmp_path)
         workflow = tmp_path / "WORKFLOW.md"
         workflow.write_text("---\n---\n")
         env_file = tmp_path / ".env"

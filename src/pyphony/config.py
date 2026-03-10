@@ -55,11 +55,10 @@ def service_config_from_workflow(
     config: dict[str, Any],
     workflow_path: Path | str | None = None,
 ) -> ServiceConfig:
-    # Load .env next to workflow file (does not override real env vars)
-    if workflow_path:
-        env_path = Path(workflow_path).resolve().parent / ".env"
-        if env_path.is_file():
-            load_dotenv(env_path, override=False)
+    # Load .env from current working directory (does not override real env vars)
+    env_path = Path.cwd() / ".env"
+    if env_path.is_file():
+        load_dotenv(env_path, override=False)
 
     t = config.get("tracker") or {}
     p = config.get("polling") or {}
