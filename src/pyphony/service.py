@@ -59,6 +59,12 @@ async def _run_service(args: argparse.Namespace) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _handle_signal)
 
+    exit_on_merge = getattr(args, "exit_on_merge", False)
+    if exit_on_merge:
+        orchestrator.exit_on_merge = True
+        orchestrator.merge_detected_event = stop_event
+        log.info("exit_on_merge_enabled")
+
     await orchestrator.startup_terminal_cleanup()
 
     try:
@@ -87,9 +93,14 @@ async def _run_service(args: argparse.Namespace) -> None:
         await tracker.close()
         log.info("service_stopped")
 
+    if exit_on_merge and orchestrator.merge_detected:
+        raise SystemExit(10)
+
 
 def run_service(args: argparse.Namespace) -> None:
     try:
         asyncio.run(_run_service(args))
+    except SystemExit:
+        raise
     except KeyboardInterrupt:
         pass

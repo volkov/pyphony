@@ -18,6 +18,7 @@ dependencies = [
 
 [project.scripts]
 pyphony = "pyphony.cli:main"
+pyphony-sv = "pyphony.supervisor:main"
 
 [build-system]
 requires = ["hatchling"]

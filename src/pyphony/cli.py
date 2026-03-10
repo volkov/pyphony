@@ -59,6 +59,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="HTTP server port (overrides server.port in workflow config)",
     )
     parser.add_argument(
+        "--exit-on-merge",
+        action="store_true",
+        default=False,
+        help="Exit with code 10 when an issue is marked Done (for supervisor restart)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
