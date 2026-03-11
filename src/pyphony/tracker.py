@@ -215,6 +215,7 @@ class LinearClient:
                 "created_at": node.get("createdAt", ""),
                 "user": (node.get("user") or {}).get("name", ""),
             })
+        comments.sort(key=lambda c: c["created_at"])
         return comments
 
     async def replace_issue_labels(

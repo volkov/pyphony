@@ -582,6 +582,78 @@ class TestErrorHandling:
                 await client.close()
 
 
+class TestFetchIssueComments:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_comments_sorted_by_created_at_ascending(self):
+        """Comments returned by API in reverse order should be sorted oldest-first."""
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "issue": {
+                            "comments": {
+                                "nodes": [
+                                    {
+                                        "id": "c3",
+                                        "body": "Newest",
+                                        "createdAt": "2025-03-03T00:00:00.000Z",
+                                        "user": {"name": "Charlie"},
+                                    },
+                                    {
+                                        "id": "c1",
+                                        "body": "Oldest",
+                                        "createdAt": "2025-03-01T00:00:00.000Z",
+                                        "user": {"name": "Alice"},
+                                    },
+                                    {
+                                        "id": "c2",
+                                        "body": "Middle",
+                                        "createdAt": "2025-03-02T00:00:00.000Z",
+                                        "user": {"name": "Bob"},
+                                    },
+                                ]
+                            }
+                        }
+                    }
+                },
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            comments = await client.fetch_issue_comments("issue-1")
+        finally:
+            await client.close()
+
+        assert len(comments) == 3
+        assert comments[0]["user"] == "Alice"
+        assert comments[0]["body"] == "Oldest"
+        assert comments[1]["user"] == "Bob"
+        assert comments[1]["body"] == "Middle"
+        assert comments[2]["user"] == "Charlie"
+        assert comments[2]["body"] == "Newest"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_comments_empty_when_issue_not_found(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": {"issue": None}},
+            )
+        )
+
+        client = LinearClient(_make_config())
+        try:
+            comments = await client.fetch_issue_comments("nonexistent")
+        finally:
+            await client.close()
+
+        assert comments == []
+
+
 class TestGetIssue:
     @respx.mock
     @pytest.mark.asyncio

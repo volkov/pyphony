@@ -74,10 +74,13 @@ def render_prompt(
         if issue.updated_at:
             updated_str = f" (updated: {issue.updated_at.strftime('%Y-%m-%d %H:%M UTC')})"
         rendered += f"\n\n---\n## Comments on this issue{updated_str}:\n"
-        for comment in comments:
+        rendered += "\n> Comments are in chronological order. Pay special attention to the latest comment — it contains the most recent feedback.\n"
+        for i, comment in enumerate(comments):
             user = comment.get("user", "Unknown")
             created_at = comment.get("created_at", "")
             comment_body = comment.get("body", "")
+            if i == len(comments) - 1 and len(comments) > 1:
+                rendered += "\n### Latest comment\n"
             rendered += f"\n**{user}** ({created_at}):\n{comment_body}\n"
 
     # Append special instructions based on labels
