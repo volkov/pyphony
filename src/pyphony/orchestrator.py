@@ -22,6 +22,7 @@ from .models import (
     ServiceConfig,
 )
 from .normalization import normalize_label, normalize_state, sort_issues_for_dispatch
+from .prompt import render_prompt
 from .tracker import LinearClient
 from .workspace import WorkspaceManager
 
@@ -103,6 +104,7 @@ class Orchestrator:
         workspace_mgr: WorkspaceManager,
         run_agent_fn=None,
         *,
+        prompt_template: str = "",
         excluded_issue_ids_fn: callable | None = None,
         peer_running_fn: callable | None = None,
     ) -> None:
@@ -110,6 +112,7 @@ class Orchestrator:
         self._tracker = tracker
         self._workspace_mgr = workspace_mgr
         self._run_agent_fn = run_agent_fn
+        self._prompt_template = prompt_template
         self._excluded_issue_ids_fn = excluded_issue_ids_fn
         self._peer_running_fn = peer_running_fn
         self._state = OrchestratorRuntimeState(
@@ -309,11 +312,113 @@ class Orchestrator:
             reason=reason,
         )
 
+        # Check for interactive label — handle without launching agent
+        issue_labels_norm = [normalize_label(l) for l in issue.labels]
+        if "interactive" in issue_labels_norm:
+            await self._handle_interactive_issue(issue, entry)
+            return
+
         if self._run_agent_fn:
             task = asyncio.create_task(
                 self._run_worker(issue, entry)
             )
             entry.worker_task = task
+
+    async def _handle_interactive_issue(self, issue: Issue, entry: RunningEntry) -> None:
+        """Handle an issue tagged with 'interactive' label.
+
+        Prepares the workspace and prompt but does NOT launch an agent.
+        Instead, posts a comment with instructions for the user to run
+        Claude Code manually, swaps labels, and transitions to In Review.
+        """
+        try:
+            # 1. Create/reuse workspace
+            workspace = await self._workspace_mgr.create_or_reuse(issue.identifier)
+            workspace_path = workspace.path
+
+            # 2. Run before_run hook
+            await self._workspace_mgr.run_before_run(workspace_path)
+
+            # 3. Fetch comments and render prompt
+            comments = None
+            try:
+                comments = await self._tracker.fetch_issue_comments(issue.id)
+            except Exception as exc:
+                log.warning(
+                    "interactive_fetch_comments_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
+
+            prompt = render_prompt(
+                self._prompt_template, issue, attempt=entry.attempt.attempt,
+                comments=comments,
+            )
+
+            # 4. Post comment with instructions
+            comment_body = (
+                "🖥️ Interactive task — запусти Claude Code вручную:\n"
+                "```\n"
+                f"cd {workspace_path}\n"
+                "claude\n"
+                "```\n\n"
+                "Промпт для задачи:\n"
+                f"{prompt}"
+            )
+            try:
+                await self._tracker.comment_on_issue(issue.id, comment_body)
+                log.info(
+                    "interactive_comment_posted",
+                    issue_identifier=issue.identifier,
+                )
+            except Exception as exc:
+                log.warning(
+                    "interactive_comment_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
+
+            # 5. Swap labels: remove 'interactive', add 'interactive-ready'
+            try:
+                await self._tracker.replace_issue_labels(
+                    issue.id,
+                    remove_labels=["interactive"],
+                    add_labels=["interactive-ready"],
+                )
+                log.info(
+                    "interactive_labels_swapped",
+                    issue_identifier=issue.identifier,
+                )
+            except Exception as exc:
+                log.warning(
+                    "interactive_label_swap_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
+
+            # 6. Transition to In Review
+            try:
+                await self._tracker.transition_issue(issue.id, "In Review")
+                log.info(
+                    "interactive_transitioned",
+                    issue_identifier=issue.identifier,
+                )
+            except Exception as exc:
+                log.warning(
+                    "interactive_transition_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
+
+        except Exception as exc:
+            log.error(
+                "interactive_handling_failed",
+                issue_identifier=issue.identifier,
+                error=str(exc),
+            )
+        finally:
+            # 7. Release claim — interactive task does not occupy a slot
+            self._release_claim(issue.id)
 
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
         async def _post_transcript_comment(transcript_path: str, workspace_path: str = "") -> None:
