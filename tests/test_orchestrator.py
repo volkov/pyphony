@@ -17,7 +17,8 @@ from pyphony.models import (
     TrackerConfig,
     WorkspaceConfig,
 )
-from pyphony.orchestrator import Orchestrator, _build_transcript_url, _build_transcript_comment
+from pyphony.models import MergeInfo
+from pyphony.orchestrator import Orchestrator, _build_merge_comment, _build_transcript_url, _build_transcript_comment
 from pyphony.tracker import LinearClient
 from pyphony.workspace import WorkspaceManager
 
@@ -2089,3 +2090,101 @@ class TestGracefulDrain:
         assert orch.merge_detected_event.is_set()
         # Issue should be removed from running after completion
         assert issue.id not in orch.state.running
+
+
+class TestBuildMergeComment:
+    """Tests for the _build_merge_comment helper."""
+
+    def test_with_diffstat(self):
+        info = MergeInfo(
+            commit_sha="abc1234567890",
+            diffstat=" src/foo.py | 10 +++++++---\n 2 files changed, 7 insertions(+), 3 deletions(-)",
+        )
+        comment = _build_merge_comment(info)
+        assert "abc1234567" in comment
+        assert "src/foo.py" in comment
+        assert "```" in comment
+
+    def test_without_diffstat(self):
+        info = MergeInfo(commit_sha="abc1234567890", diffstat="")
+        comment = _build_merge_comment(info)
+        assert "abc1234567" in comment
+        assert "```" not in comment
+
+    def test_short_sha_truncated_to_10(self):
+        info = MergeInfo(commit_sha="abcdef1234567890abcdef", diffstat="")
+        comment = _build_merge_comment(info)
+        assert "abcdef1234" in comment
+        assert "567890" not in comment
+
+
+class TestMergeCommentPosted:
+    """Verify that a merge comment is posted when rebase succeeds (no PR path)."""
+
+    @pytest.mark.asyncio
+    async def test_merge_comment_posted_on_rebase(self, tmp_path):
+        """When rebase succeeds, a comment with commit SHA and diffstat is posted."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        merge_info = MergeInfo(
+            commit_sha="deadbeef1234567890",
+            diffstat=" src/main.py | 5 +++--\n 1 file changed, 3 insertions(+), 2 deletions(-)",
+        )
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock), \
+             patch.object(ws_mgr, "rebase_branch_onto_main", new_callable=AsyncMock, return_value=merge_info), \
+             patch.object(ws_mgr, "cleanup_workspace", new_callable=AsyncMock):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        # First comment is the agent result, second is the merge info
+        assert len(posted_bodies) == 2
+        merge_comment = posted_bodies[1]
+        assert "deadbeef12" in merge_comment
+        assert "src/main.py" in merge_comment
+
+    @pytest.mark.asyncio
+    async def test_no_merge_comment_when_rebase_fails(self, tmp_path):
+        """When rebase returns None, no merge comment is posted."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock), \
+             patch.object(ws_mgr, "rebase_branch_onto_main", new_callable=AsyncMock, return_value=None):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        # Only the agent result comment, no merge comment
+        assert len(posted_bodies) == 1
+        assert "[DONE]" in posted_bodies[0]

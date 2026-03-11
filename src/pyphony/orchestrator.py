@@ -14,6 +14,7 @@ from .models import (
     AgentTotals,
     Issue,
     LiveSession,
+    MergeInfo,
     OrchestratorRuntimeState,
     RetryEntry,
     RunAttempt,
@@ -72,6 +73,24 @@ def _build_transcript_comment(
         lines.append("```")
         lines.append(f"cd {workspace_path}")
         lines.append(f"claude --resume {session_id}")
+        lines.append("```")
+
+    return "\n".join(lines)
+
+
+def _build_merge_comment(merge_info: MergeInfo) -> str:
+    """Build a comment describing a direct merge (no PR).
+
+    Includes the commit SHA and a per-file diffstat so reviewers can
+    see what changed at a glance.
+    """
+    short_sha = merge_info.commit_sha[:10]
+    lines = [f"Merged directly to main — commit `{short_sha}`"]
+
+    if merge_info.diffstat:
+        lines.append("")
+        lines.append("```")
+        lines.append(merge_info.diffstat)
         lines.append("```")
 
     return "\n".join(lines)
@@ -556,14 +575,29 @@ class Orchestrator:
                 else:
                     # Rebase worktree branch onto main (linear history)
                     try:
-                        rebased = await self._workspace_mgr.rebase_branch_onto_main(
+                        merge_info = await self._workspace_mgr.rebase_branch_onto_main(
                             entry.issue.identifier,
                         )
-                        if rebased:
+                        if merge_info:
                             log.info(
                                 "branch_rebased_onto_main",
                                 issue_identifier=entry.issue.identifier,
+                                commit_sha=merge_info.commit_sha,
                             )
+
+                            # Post a comment with changed files and commit SHA
+                            merge_comment = _build_merge_comment(merge_info)
+                            try:
+                                await self._tracker.comment_on_issue(
+                                    issue_id, merge_comment,
+                                )
+                            except Exception as exc:
+                                log.warning(
+                                    "merge_comment_failed",
+                                    issue_identifier=entry.issue.identifier,
+                                    error=str(exc),
+                                )
+
                             # Clean up worktree and delete the merged branch
                             await self._workspace_mgr.cleanup_workspace(
                                 entry.issue.identifier, delete_branch=True,
