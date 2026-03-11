@@ -11,6 +11,7 @@ from pyphony.models import (
     BlockerRef,
     CodexConfig,
     Issue,
+    RetryEntry,
     RunAttempt,
     RunningEntry,
     ServiceConfig,
@@ -2359,3 +2360,344 @@ class TestMergeCommentPosted:
         # Only the agent result comment, no merge comment
         assert len(posted_bodies) == 1
         assert "[DONE]" in posted_bodies[0]
+
+
+class TestMultiturnSupport:
+    """Tests for the multiturn-support label feature (SER-90)."""
+
+    @pytest.mark.asyncio
+    async def test_multiturn_schedules_polling_on_normal_exit_without_done(self, tmp_path):
+        """When agent exits normally without [DONE] and has multiturn-support label,
+        orchestrator should schedule a multiturn polling retry."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[
+                 {"body": "first", "created_at": "2025-01-01T00:00:00Z", "user": "User"},
+             ]):
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None, result="Working on it..."
+            )
+
+        # Should have a retry entry with multiturn_waiting=True
+        assert issue.id in orch.state.retry_attempts
+        retry = orch.state.retry_attempts[issue.id]
+        assert retry.multiturn_waiting is True
+        # 1 existing comment + 1 result comment + 1 waiting comment = 3
+        # But fetch_issue_comments mock returns 1, then +1 for the "waiting" comment = 2
+        # (the result comment is posted before fetch_issue_comments is called in multiturn path,
+        # but our mock returns a fixed value)
+        assert retry.last_comment_count == 2  # 1 from mock + 1 for waiting comment
+
+        # Issue should NOT be released — still claimed
+        assert issue.id in orch.state.claimed
+
+        # Cancel timer to avoid event loop issues
+        if retry.timer_handle:
+            retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_not_triggered_when_done_signaled(self, tmp_path):
+        """When agent signals [DONE], multiturn should not activate."""
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=5))
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch.object(ws_mgr, "rebase_branch_onto_main", new_callable=AsyncMock, return_value=None):
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None, result="All done! [DONE]"
+            )
+
+        # Should NOT have multiturn retry
+        if issue.id in orch.state.retry_attempts:
+            retry = orch.state.retry_attempts[issue.id]
+            assert retry.multiturn_waiting is False
+            if retry.timer_handle:
+                retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_not_triggered_on_error(self, tmp_path):
+        """Multiturn should not activate on abnormal exit."""
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=5))
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(
+                issue.id, normal=False, error="something broke", result=None
+            )
+
+        # Should have normal retry, not multiturn
+        if issue.id in orch.state.retry_attempts:
+            retry = orch.state.retry_attempts[issue.id]
+            assert retry.multiturn_waiting is False
+            if retry.timer_handle:
+                retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_not_triggered_without_label(self, tmp_path):
+        """Without multiturn-support label, normal retry/max_runs behavior applies."""
+        config = _make_config(tmp_path, agent=AgentConfig(max_concurrent_agents=3, max_runs=1))
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=[])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None, result="Partial work"
+            )
+
+        # With max_runs=1, should be released (no retry)
+        assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_multiturn_retry_dispatches_on_new_comments(self, tmp_path):
+        """When polling detects new comments, agent should be re-dispatched."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+
+        dispatched = []
+
+        async def fake_agent_fn(issue, attempt, on_transcript=None):
+            dispatched.append((issue.identifier, attempt))
+            return RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                status="completed",
+                result="Working...",
+            )
+
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=fake_agent_fn)
+
+        issue = _make_issue(labels=["multiturn-support"])
+
+        # Set up a multiturn waiting retry entry
+        orch.state.claimed.add(issue.id)
+        orch.state.retry_attempts[issue.id] = RetryEntry(
+            issue_id=issue.id,
+            identifier=issue.identifier,
+            attempt=1,
+            multiturn_waiting=True,
+            last_comment_count=3,
+        )
+
+        # Mock: comments now have 4 (was 3) — new comment detected
+        with patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[
+            {"body": "c1", "created_at": "2025-01-01T00:00:00Z", "user": "U"},
+            {"body": "c2", "created_at": "2025-01-01T00:01:00Z", "user": "U"},
+            {"body": "c3", "created_at": "2025-01-01T00:02:00Z", "user": "Bot"},
+            {"body": "Do this next", "created_at": "2025-01-01T00:03:00Z", "user": "U"},
+        ]):
+            # Mock candidate fetch to return the issue
+            respx.post(ENDPOINT).mock(
+                return_value=httpx.Response(
+                    200,
+                    json=_graphql_response([_issue_node(
+                        id=issue.id,
+                        identifier=issue.identifier,
+                        state_name="In Progress",
+                    )]),
+                )
+            )
+
+            await orch._handle_retry(issue.id)
+            await tracker.close()
+
+        # Should have dispatched (issue should be in running)
+        assert issue.id in orch.state.running
+
+    @pytest.mark.asyncio
+    async def test_multiturn_retry_keeps_waiting_when_no_new_comments(self, tmp_path):
+        """When no new comments, retry should re-schedule with multiturn_waiting."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+
+        orch.state.claimed.add(issue.id)
+        orch.state.retry_attempts[issue.id] = RetryEntry(
+            issue_id=issue.id,
+            identifier=issue.identifier,
+            attempt=1,
+            multiturn_waiting=True,
+            last_comment_count=3,
+        )
+
+        # Mock: still 3 comments — no new ones
+        with patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[
+            {"body": "c1", "created_at": "2025-01-01T00:00:00Z", "user": "U"},
+            {"body": "c2", "created_at": "2025-01-01T00:01:00Z", "user": "U"},
+            {"body": "c3", "created_at": "2025-01-01T00:02:00Z", "user": "Bot"},
+        ]):
+            await orch._handle_retry(issue.id)
+
+        # Should be re-scheduled, still waiting
+        assert issue.id in orch.state.retry_attempts
+        retry = orch.state.retry_attempts[issue.id]
+        assert retry.multiturn_waiting is True
+        assert retry.last_comment_count == 3
+
+        if retry.timer_handle:
+            retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_retry_reschedules_on_comment_fetch_failure(self, tmp_path):
+        """If comment polling fails, retry should re-schedule gracefully."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+
+        orch.state.claimed.add(issue.id)
+        orch.state.retry_attempts[issue.id] = RetryEntry(
+            issue_id=issue.id,
+            identifier=issue.identifier,
+            attempt=1,
+            multiturn_waiting=True,
+            last_comment_count=3,
+        )
+
+        with patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock,
+                          side_effect=Exception("API timeout")):
+            await orch._handle_retry(issue.id)
+
+        # Should be re-scheduled despite failure
+        assert issue.id in orch.state.retry_attempts
+        retry = orch.state.retry_attempts[issue.id]
+        assert retry.multiturn_waiting is True
+        assert retry.last_comment_count == 3
+
+        if retry.timer_handle:
+            retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_posts_waiting_comment(self, tmp_path):
+        """Orchestrator should post a 'waiting for comments' message."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["multiturn-support"])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None, result="Progress made"
+            )
+
+        # Should post: 1) result comment 2) waiting comment
+        assert len(posted_bodies) == 2
+        assert "Progress made" in posted_bodies[0]
+        assert "Waiting for new comments" in posted_bodies[1]
+
+        # Cleanup
+        retry = orch.state.retry_attempts.get(issue.id)
+        if retry and retry.timer_handle:
+            retry.timer_handle.cancel()
+
+    @pytest.mark.asyncio
+    async def test_multiturn_skipped_during_drain(self, tmp_path):
+        """During drain mode, multiturn should not activate."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch._draining = True
+
+        issue = _make_issue(labels=["multiturn-support"])
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(
+                issue.id, normal=True, error=None, result="Partial work"
+            )
+
+        # Should be released, no retry
+        assert issue.id not in orch.state.retry_attempts
+        assert issue.id not in orch.state.claimed
+
+    @pytest.mark.asyncio
+    async def test_multiturn_full_cycle_via_run_worker(self, tmp_path):
+        """Integration test: agent completes → multiturn waiting → new comment → re-dispatch."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+
+        run_count = 0
+
+        async def fake_agent_fn(issue, attempt, on_transcript=None):
+            nonlocal run_count
+            run_count += 1
+            return RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                status="completed",
+                result="Working on the task...",
+            )
+
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=fake_agent_fn)
+
+        issue = _make_issue(labels=["multiturn-support"])
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[
+                 {"body": "initial", "created_at": "2025-01-01T00:00:00Z", "user": "User"},
+             ]):
+            # Dispatch the issue
+            await orch._dispatch(issue)
+            # Wait for the worker task to complete
+            entry = orch.state.running.get(issue.id)
+            if entry and entry.worker_task:
+                await entry.worker_task
+
+        assert run_count == 1
+
+        # Verify multiturn waiting is set up
+        assert issue.id in orch.state.retry_attempts
+        retry = orch.state.retry_attempts[issue.id]
+        assert retry.multiturn_waiting is True
+
+        if retry.timer_handle:
+            retry.timer_handle.cancel()

@@ -27,6 +27,8 @@ from .workspace import WorkspaceManager
 
 _IN_PROGRESS_STATE = "In Progress"
 _WORKFLOW_ISSUE_LABEL = "workflow issue"
+_MULTITURN_SUPPORT_LABEL = "multiturn support"  # normalized form of "multiturn-support"
+_MULTITURN_POLL_DELAY_MS = 30000  # 30 seconds between comment polls
 
 log = structlog.stdlib.get_logger()
 
@@ -693,6 +695,54 @@ class Orchestrator:
                 self._signal_drain_complete()
             return
 
+        # --- Multiturn support: wait for new comments before re-dispatching ---
+        multiturn_enabled = _MULTITURN_SUPPORT_LABEL in issue_labels_norm
+        if multiturn_enabled and normal and not done_signaled:
+            # Count current comments so we can detect new ones later
+            comment_count = 0
+            try:
+                comments = await self._tracker.fetch_issue_comments(issue_id)
+                comment_count = len(comments)
+            except Exception as exc:
+                log.warning(
+                    "multiturn_comment_count_failed",
+                    issue_identifier=entry.issue.identifier,
+                    error=str(exc),
+                )
+
+            log.info(
+                "multiturn_waiting",
+                issue_identifier=entry.issue.identifier,
+                comment_count=comment_count,
+            )
+
+            try:
+                await self._tracker.comment_on_issue(
+                    issue_id,
+                    "⏳ Agent completed this turn. Waiting for new comments to continue "
+                    "(multiturn-support enabled).\n\n"
+                    "Reply to this issue to send the agent a new instruction.",
+                )
+                comment_count += 1  # account for the comment we just posted
+            except Exception as exc:
+                log.warning(
+                    "multiturn_waiting_comment_failed",
+                    issue_identifier=entry.issue.identifier,
+                    error=str(exc),
+                )
+
+            current_attempt = entry.attempt.attempt or 0
+            self._schedule_retry(
+                issue_id=issue_id,
+                identifier=entry.issue.identifier,
+                attempt=current_attempt + 1,
+                delay_ms=_MULTITURN_POLL_DELAY_MS,
+                error=None,
+                multiturn_waiting=True,
+                last_comment_count=comment_count,
+            )
+            return
+
         current_attempt = entry.attempt.attempt or 0
         max_runs = self._config.agent.max_runs
         next_attempt = current_attempt + 1
@@ -775,6 +825,9 @@ class Orchestrator:
         attempt: int,
         delay_ms: float,
         error: str | None,
+        *,
+        multiturn_waiting: bool = False,
+        last_comment_count: int = 0,
     ) -> None:
         existing = self._state.retry_attempts.pop(issue_id, None)
         if existing and existing.timer_handle:
@@ -795,20 +848,74 @@ class Orchestrator:
             due_at_ms=due_at_ms,
             timer_handle=timer,
             error=error,
+            multiturn_waiting=multiturn_waiting,
+            last_comment_count=last_comment_count,
         )
 
+        reason = error or ("multiturn_waiting" if multiturn_waiting else "normal_completion")
         log.info(
             "retry_scheduled",
             issue_identifier=identifier,
             attempt=attempt,
             delay_ms=delay_ms,
-            reason=error or "normal_completion",
+            reason=reason,
+            multiturn_waiting=multiturn_waiting,
         )
 
     async def _handle_retry(self, issue_id: str) -> None:
         entry = self._state.retry_attempts.pop(issue_id, None)
         if entry is None:
             return
+
+        # --- Multiturn: check for new comments before dispatching ---
+        if entry.multiturn_waiting:
+            try:
+                comments = await self._tracker.fetch_issue_comments(issue_id)
+                current_count = len(comments)
+            except Exception as exc:
+                log.warning(
+                    "multiturn_poll_failed",
+                    issue_identifier=entry.identifier,
+                    error=str(exc),
+                )
+                # Re-schedule on failure
+                self._schedule_retry(
+                    issue_id=issue_id,
+                    identifier=entry.identifier,
+                    attempt=entry.attempt,
+                    delay_ms=_MULTITURN_POLL_DELAY_MS,
+                    error=None,
+                    multiturn_waiting=True,
+                    last_comment_count=entry.last_comment_count,
+                )
+                return
+
+            if current_count <= entry.last_comment_count:
+                # No new comments — keep waiting
+                log.debug(
+                    "multiturn_no_new_comments",
+                    issue_identifier=entry.identifier,
+                    comment_count=current_count,
+                    last_comment_count=entry.last_comment_count,
+                )
+                self._schedule_retry(
+                    issue_id=issue_id,
+                    identifier=entry.identifier,
+                    attempt=entry.attempt,
+                    delay_ms=_MULTITURN_POLL_DELAY_MS,
+                    error=None,
+                    multiturn_waiting=True,
+                    last_comment_count=entry.last_comment_count,
+                )
+                return
+
+            # New comments detected — proceed to dispatch
+            log.info(
+                "multiturn_new_comments_detected",
+                issue_identifier=entry.identifier,
+                new_comments=current_count - entry.last_comment_count,
+                comment_count=current_count,
+            )
 
         try:
             issues = await self._tracker.fetch_candidate_issues()
@@ -835,13 +942,25 @@ class Orchestrator:
 
         slots = self._available_slots(target.state)
         if slots <= 0:
-            self._schedule_retry(
-                issue_id=issue_id,
-                identifier=entry.identifier,
-                attempt=entry.attempt,
-                delay_ms=1000,
-                error="no available orchestrator slots",
-            )
+            if entry.multiturn_waiting:
+                # Keep multiturn state for when slot becomes available
+                self._schedule_retry(
+                    issue_id=issue_id,
+                    identifier=entry.identifier,
+                    attempt=entry.attempt,
+                    delay_ms=1000,
+                    error="no available orchestrator slots",
+                    multiturn_waiting=False,  # ready to dispatch, just waiting for slot
+                    last_comment_count=0,
+                )
+            else:
+                self._schedule_retry(
+                    issue_id=issue_id,
+                    identifier=entry.identifier,
+                    attempt=entry.attempt,
+                    delay_ms=1000,
+                    error="no available orchestrator slots",
+                )
             return
 
         self._state.claimed.discard(issue_id)

@@ -154,6 +154,8 @@ class RetryEntry(BaseModel):
     due_at_ms: float = 0.0
     timer_handle: Any = None
     error: str | None = None
+    multiturn_waiting: bool = False
+    last_comment_count: int = 0
 
     model_config = {"arbitrary_types_allowed": True}
 
