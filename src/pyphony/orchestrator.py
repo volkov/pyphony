@@ -336,7 +336,7 @@ class Orchestrator:
         error: str | None,
         result: str | None = None,
     ) -> None:
-        entry = self._state.running.pop(issue_id, None)
+        entry = self._state.running.get(issue_id)
         if entry is None:
             return
 
@@ -594,6 +594,12 @@ class Orchestrator:
             if plan_required or merge_conflict:
                 self._release_claim(issue_id)
                 return
+
+        # Remove from running only after all post-completion HTTP calls
+        # (comment, automerge, transition) have finished.  This prevents a
+        # race where the drain coordinator sees running == 0 and closes the
+        # HTTP client while these calls are still in flight (SER-63).
+        self._state.running.pop(issue_id, None)
 
         # While draining, skip retries and check if drain is complete
         if self._draining:
