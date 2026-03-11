@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Convenience wrapper: runs pyphony CLI via uv
+exec uv run python -m pyphony "$@"

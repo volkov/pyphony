@@ -43,14 +43,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     get_parser = subparsers.add_parser(
         "get-issue", help="Get an existing issue from Linear by identifier"
     )
-    get_parser.add_argument("--identifier", required=True, help="Issue identifier (e.g. SER-27)")
+    get_parser.add_argument("identifier", help="Issue identifier (e.g. SER-27)")
     _add_common_args(get_parser)
 
     # Update issue
     update_parser = subparsers.add_parser(
         "update-issue", help="Update an existing issue in Linear"
     )
-    update_parser.add_argument("--identifier", required=True, help="Issue identifier (e.g. SER-27)")
+    update_parser.add_argument("identifier", help="Issue identifier (e.g. SER-27)")
     update_parser.add_argument("--title", default=None, help="New issue title")
     update_parser.add_argument("--description", default=None, help="New issue description (markdown)")
     update_parser.add_argument("--state", default=None, help="New issue state (e.g. 'In Progress', 'Done')")

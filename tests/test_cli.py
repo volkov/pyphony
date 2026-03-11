@@ -75,14 +75,20 @@ class TestParseArgs:
         assert args.exit_on_merge is True
 
     def test_get_issue_subcommand(self):
-        args = parse_args(["get-issue", "--identifier", "SER-27"])
+        args = parse_args(["get-issue", "SER-27"])
         assert args.command == "get-issue"
         assert args.identifier == "SER-27"
         assert args.workflow_file == "WORKFLOW.md"
 
+    def test_get_issue_with_workflow(self):
+        args = parse_args(["get-issue", "SER-27", "custom.md"])
+        assert args.command == "get-issue"
+        assert args.identifier == "SER-27"
+        assert args.workflow_file == "custom.md"
+
     def test_update_issue_subcommand(self):
         args = parse_args([
-            "update-issue", "--identifier", "SER-27",
+            "update-issue", "SER-27",
             "--title", "New title", "--state", "Done",
         ])
         assert args.command == "update-issue"
@@ -94,7 +100,7 @@ class TestParseArgs:
 
     def test_update_issue_with_description(self):
         args = parse_args([
-            "update-issue", "--identifier", "SER-27",
+            "update-issue", "SER-27",
             "--description", "Updated description",
             "custom.md",
         ])

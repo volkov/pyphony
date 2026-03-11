@@ -97,10 +97,10 @@ Wait for the user to choose an option, then:
 - **Option 1**: Investigate the root cause and implement a fix directly. Follow normal development workflow (edit code, test, commit).
 - **Option 2**: Use the create-task skill to create a ticket with `--state Todo`:
   ```
-  uv run python -m pyphony create-issue WORKFLOW.md --title "Fix: <concise problem summary>" --description "<details from debug report>" --state Todo
+  ./pyphony create-issue --title "Fix: <concise problem summary>" --description "<details from debug report>" --state Todo
   ```
   This puts the issue in Todo state so pyphony will dispatch an agent to work on it immediately.
 - **Option 3**: Use the create-task skill to create a ticket in Backlog (default):
   ```
-  uv run python -m pyphony create-issue WORKFLOW.md --title "Fix: <concise problem summary>" --description "<details from debug report>"
+  ./pyphony create-issue --title "Fix: <concise problem summary>" --description "<details from debug report>"
   ```
