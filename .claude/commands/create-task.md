@@ -27,7 +27,34 @@ The command reads `WORKFLOW.md` for the Linear API key and project slug, then cr
 - Use `--state Todo` to create the issue in **Todo** state — pyphony will pick it up and dispatch an agent to work on it immediately.
 
 4. The command outputs JSON with `id`, `identifier`, `title`, and `url` of the created issue.
-5. Show the user the result: issue identifier and a link to it.
+5. **Labels**: CLI does not support adding labels at creation time. If the task needs a label (e.g. `plan required`), add it after creation via the tracker API:
+   ```python
+   uv run python -c "
+   import asyncio
+   from pyphony.workflow import load_workflow
+   from pyphony.config import service_config_from_workflow
+   from pyphony.tracker import LinearClient
+
+   async def main():
+       wf = load_workflow('WORKFLOW.md')
+       cfg = service_config_from_workflow(wf.config)
+       client = LinearClient(cfg)
+       await client.replace_issue_labels('<issue_id>', remove_labels=[], add_labels=['plan required'])
+       await client.close()
+
+   asyncio.run(main())
+   "
+   ```
+6. Show the user the result: issue identifier and a link to it.
+
+## When to add `plan required` label
+
+Add the `plan required` label when the task is about **research, investigation, or planning** rather than direct code execution. Examples:
+- "исследовать варианты...", "разобраться как...", "спланировать..."
+- "investigate", "explore options", "design approach"
+- User explicitly asks for a plan ("создай задачу на plan")
+
+With this label, the agent will produce a plan and post it as a comment instead of executing changes directly.
 
 ## Arguments
 
