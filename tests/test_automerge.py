@@ -3,11 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import tempfile
 from unittest.mock import AsyncMock, patch, MagicMock, call
 
 import pytest
 
-from pyphony.automerge import _parse_pr_ref, try_automerge_pr, _gh_update_branch, _gh_merge
+from pyphony.automerge import (
+    _parse_pr_ref,
+    extract_pr_urls_from_transcript,
+    try_automerge_pr,
+    _gh_update_branch,
+    _gh_merge,
+)
 
 
 class TestParsePrRef:
@@ -185,3 +194,111 @@ class TestTryAutomergePr:
                     new_callable=AsyncMock, side_effect=RuntimeError("boom")):
             result = await try_automerge_pr("https://github.com/owner/repo/pull/42")
         assert result is False
+
+
+def _write_transcript(lines: list[dict]) -> str:
+    """Write transcript JSONL to a temp file, return path."""
+    fd, path = tempfile.mkstemp(suffix=".jsonl")
+    with os.fdopen(fd, "w") as f:
+        for entry in lines:
+            f.write(json.dumps(entry) + "\n")
+    return path
+
+
+class TestExtractPrUrlsFromTranscript:
+    def test_none_path(self):
+        assert extract_pr_urls_from_transcript(None) == []
+
+    def test_missing_file(self):
+        assert extract_pr_urls_from_transcript("/nonexistent/path.jsonl") == []
+
+    def test_pr_url_in_tool_result(self):
+        """PR URL found in a tool_result entry (e.g. gh pr create output)."""
+        path = _write_transcript([
+            {"type": "tool_result", "content": "https://github.com/toloka-partners/taiga-examples/pull/2\n"},
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/toloka-partners/taiga-examples/pull/2"]
+        finally:
+            os.unlink(path)
+
+    def test_pr_url_in_assistant_text(self):
+        """PR URL found in an assistant message text block."""
+        path = _write_transcript([
+            {
+                "type": "assistant",
+                "message": {
+                    "content": [
+                        {"type": "text", "text": "I created PR https://github.com/owner/repo/pull/42 for you."},
+                    ],
+                },
+            },
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/owner/repo/pull/42"]
+        finally:
+            os.unlink(path)
+
+    def test_pr_url_in_result_field(self):
+        """PR URL found in a ResultMessage-style entry."""
+        path = _write_transcript([
+            {"result": "[DONE] PR: https://github.com/owner/repo/pull/99"},
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/owner/repo/pull/99"]
+        finally:
+            os.unlink(path)
+
+    def test_deduplication(self):
+        """Same URL appearing multiple times is returned once."""
+        path = _write_transcript([
+            {"type": "tool_result", "content": "https://github.com/o/r/pull/1\n"},
+            {"result": "Created https://github.com/o/r/pull/1"},
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/o/r/pull/1"]
+        finally:
+            os.unlink(path)
+
+    def test_multiple_prs(self):
+        """Multiple different PR URLs are all returned."""
+        path = _write_transcript([
+            {"type": "tool_result", "content": "https://github.com/o/r/pull/1\n"},
+            {"type": "tool_result", "content": "https://github.com/o/r2/pull/2\n"},
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/o/r/pull/1", "https://github.com/o/r2/pull/2"]
+        finally:
+            os.unlink(path)
+
+    def test_no_pr_urls(self):
+        """Transcript with no PR URLs returns empty list."""
+        path = _write_transcript([
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "All done!"}]}},
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == []
+        finally:
+            os.unlink(path)
+
+    def test_nested_tool_result_content(self):
+        """PR URL in nested tool_result content list."""
+        path = _write_transcript([
+            {
+                "type": "tool_result",
+                "content": [
+                    {"type": "text", "text": "https://github.com/org/proj/pull/5"},
+                ],
+            },
+        ])
+        try:
+            urls = extract_pr_urls_from_transcript(path)
+            assert urls == ["https://github.com/org/proj/pull/5"]
+        finally:
+            os.unlink(path)

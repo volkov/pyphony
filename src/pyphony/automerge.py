@@ -9,7 +9,9 @@ base-branch changes and avoids merge-conflict failures.
 from __future__ import annotations
 
 import asyncio
+import json
 import re
+from pathlib import Path
 
 import structlog
 
@@ -18,6 +20,83 @@ log = structlog.stdlib.get_logger()
 # How many times to retry merge after updating the branch.
 _MAX_UPDATE_RETRIES = 3
 _RETRY_DELAY_S = 5
+
+# Regex to find GitHub PR URLs anywhere in text.
+_PR_URL_RE = re.compile(r"https?://github\.com/[^/]+/[^/]+/pull/\d+")
+
+# How many lines from the end of the transcript to scan for PR URLs.
+_TRANSCRIPT_TAIL_LINES = 200
+
+
+def extract_pr_urls_from_transcript(transcript_path: str | None) -> list[str]:
+    """Parse GitHub PR URLs from the last messages of a transcript JSONL file.
+
+    Scans the tail of the transcript for any ``https://github.com/.../pull/N``
+    URLs.  This serves as a fallback when Linear GitHub integration is not
+    connected and therefore no PR attachments exist on the issue.
+
+    Returns a deduplicated list of PR URLs (preserving first-seen order).
+    """
+    if not transcript_path:
+        return []
+
+    try:
+        lines = Path(transcript_path).read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+
+    # Only look at the tail of the transcript
+    tail = lines[-_TRANSCRIPT_TAIL_LINES:]
+
+    seen: set[str] = set()
+    result: list[str] = []
+
+    for raw_line in tail:
+        raw_line = raw_line.strip()
+        if not raw_line:
+            continue
+        try:
+            entry = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+
+        # Collect all text from the entry: assistant messages, tool results, etc.
+        texts: list[str] = []
+
+        # Top-level result field (ResultMessage)
+        if isinstance(entry.get("result"), str):
+            texts.append(entry["result"])
+
+        # Assistant message content blocks
+        msg = entry.get("message") if isinstance(entry.get("message"), dict) else None
+        if msg:
+            for block in msg.get("content", []):
+                if isinstance(block, dict):
+                    if block.get("type") == "text":
+                        texts.append(block.get("text", ""))
+                    # Tool result blocks can contain PR URLs too
+                    if block.get("type") == "tool_result":
+                        for sub in block.get("content", []):
+                            if isinstance(sub, dict) and sub.get("type") == "text":
+                                texts.append(sub.get("text", ""))
+
+        # Tool result entries (top-level)
+        if entry.get("type") == "tool_result":
+            content = entry.get("content")
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                for sub in content:
+                    if isinstance(sub, dict) and sub.get("type") == "text":
+                        texts.append(sub.get("text", ""))
+
+        for text in texts:
+            for url in _PR_URL_RE.findall(text):
+                if url not in seen:
+                    seen.add(url)
+                    result.append(url)
+
+    return result
 
 
 def _parse_pr_ref(pr_url: str) -> tuple[str, str] | None:
