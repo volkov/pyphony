@@ -248,6 +248,26 @@ class Orchestrator:
 
         return global_available
 
+    async def _attach_pr_to_issue(
+        self, issue_id: str, issue_identifier: str, pr_url: str
+    ) -> None:
+        """Best-effort: attach a PR URL to the Linear issue as an attachment."""
+        try:
+            ok = await self._tracker.attach_pr_to_issue(issue_id, pr_url)
+            log.info(
+                "pr_attached_to_issue",
+                issue_identifier=issue_identifier,
+                pr_url=pr_url,
+                success=ok,
+            )
+        except Exception as exc:
+            log.warning(
+                "pr_attach_failed",
+                issue_identifier=issue_identifier,
+                pr_url=pr_url,
+                error=str(exc),
+            )
+
     async def _dispatch(self, issue: Issue, retry_attempt: int = 0) -> None:
         self._state.claimed.add(issue.id)
 
@@ -504,6 +524,12 @@ class Orchestrator:
                                 issue_identifier=entry.issue.identifier,
                                 pr_urls=pr_urls,
                             )
+                            for url in pr_urls:
+                                await self._attach_pr_to_issue(
+                                    issue_id,
+                                    entry.issue.identifier,
+                                    url,
+                                )
                     for pr_url in pr_urls:
                         merged = await try_automerge_pr(pr_url)
                         log.info(
@@ -563,6 +589,12 @@ class Orchestrator:
                                 issue_identifier=entry.issue.identifier,
                                 pr_urls=pr_urls,
                             )
+                            for url in pr_urls:
+                                await self._attach_pr_to_issue(
+                                    issue_id,
+                                    entry.issue.identifier,
+                                    url,
+                                )
                     for pr_url in pr_urls:
                         merged = await try_automerge_pr(pr_url)
                         log.info(

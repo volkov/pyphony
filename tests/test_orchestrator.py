@@ -8,6 +8,7 @@ import respx
 
 from pyphony.models import (
     AgentConfig,
+    AutomergeConfig,
     BlockerRef,
     CodexConfig,
     Issue,
@@ -1325,6 +1326,91 @@ class TestAutomergeOnDone:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
             assert mock_merge.call_count == 2
+
+
+class TestTranscriptPrAttachment:
+    """Tests that PRs extracted from transcripts are attached to the Linear issue."""
+
+    @pytest.mark.asyncio
+    async def test_transcript_prs_attached_to_issue(self, tmp_path):
+        """When PRs are found in transcript (not in attachments), they get attached to the issue."""
+        config = _make_config(
+            tmp_path,
+            automerge=AutomergeConfig(parse_transcript_prs=True),
+        )
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        transcript_prs = ["https://github.com/org/repo/pull/42"]
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, return_value=True) as mock_attach, \
+             patch("pyphony.orchestrator.extract_pr_urls_from_transcript", return_value=transcript_prs), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_attach.assert_called_once_with(
+                issue.id, "https://github.com/org/repo/pull/42"
+            )
+
+    @pytest.mark.asyncio
+    async def test_no_attachment_when_prs_already_in_linear(self, tmp_path):
+        """When PRs are already attached in Linear, no extra attachment is created."""
+        config = _make_config(
+            tmp_path,
+            automerge=AutomergeConfig(parse_transcript_prs=True),
+        )
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
+             patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, return_value=True) as mock_attach, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_attach.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_attach_failure_does_not_block_merge(self, tmp_path):
+        """If attaching PR fails, automerge still proceeds."""
+        config = _make_config(
+            tmp_path,
+            automerge=AutomergeConfig(parse_transcript_prs=True),
+        )
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = []
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
+             patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, side_effect=Exception("API error")), \
+             patch("pyphony.orchestrator.extract_pr_urls_from_transcript", return_value=["https://github.com/org/repo/pull/5"]), \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_merge.assert_called_once_with("https://github.com/org/repo/pull/5")
 
 
 class TestPlanRequired:

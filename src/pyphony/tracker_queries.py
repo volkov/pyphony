@@ -113,6 +113,19 @@ query IssueAttachments($issueId: String!) {
 }
 """
 
+ATTACHMENT_CREATE_MUTATION = """
+mutation AttachmentCreate($issueId: String!, $url: String!, $title: String!) {
+  attachmentCreate(input: { issueId: $issueId, url: $url, title: $title }) {
+    success
+    attachment {
+      id
+      url
+      title
+    }
+  }
+}
+"""
+
 PROJECT_TEAMS_QUERY = """
 query ProjectTeams($projectSlug: String!) {
   projects(filter: { slugId: { eq: $projectSlug } }) {
