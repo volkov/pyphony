@@ -89,6 +89,38 @@ class TestRenderPrompt:
         result = render_prompt("Hello {{ issue.identifier }}", issue, comments=None)
         assert "Comments on this issue" not in result
 
+    def test_comments_contain_chronological_instruction(self) -> None:
+        issue = _make_issue()
+        comments = [
+            {"user": "Alice", "created_at": "2025-01-01T00:00:00Z", "body": "First"},
+        ]
+        result = render_prompt("Hello", issue, comments=comments)
+        assert "Comments are in chronological order" in result
+        assert "Pay special attention to the latest comment" in result
+
+    def test_latest_comment_marker_when_multiple_comments(self) -> None:
+        issue = _make_issue()
+        comments = [
+            {"user": "Alice", "created_at": "2025-01-01T00:00:00Z", "body": "First"},
+            {"user": "Bob", "created_at": "2025-01-02T00:00:00Z", "body": "Second"},
+            {"user": "Charlie", "created_at": "2025-01-03T00:00:00Z", "body": "Third"},
+        ]
+        result = render_prompt("Hello", issue, comments=comments)
+        # "### Latest comment" should appear before the last comment
+        marker_pos = result.index("### Latest comment")
+        charlie_pos = result.index("**Charlie**")
+        bob_pos = result.index("**Bob**")
+        assert marker_pos > bob_pos
+        assert marker_pos < charlie_pos
+
+    def test_no_latest_comment_marker_when_single_comment(self) -> None:
+        issue = _make_issue()
+        comments = [
+            {"user": "Alice", "created_at": "2025-01-01T00:00:00Z", "body": "Only comment"},
+        ]
+        result = render_prompt("Hello", issue, comments=comments)
+        assert "### Latest comment" not in result
+
     def test_plan_required_label_appends_plan_instructions(self) -> None:
         issue = _make_issue(labels=["plan required"])
         result = render_prompt("Work on {{ issue.identifier }}", issue)
