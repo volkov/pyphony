@@ -242,9 +242,11 @@ class TestAgentRunner:
     async def test_on_transcript_called_on_result(self, mock_query, service_config, issue):
         """on_transcript callback is called when session_id is found in ResultMessage."""
         transcript_paths = []
+        workspace_paths = []
 
-        async def on_transcript(path):
+        async def on_transcript(path, workspace_path=""):
             transcript_paths.append(path)
+            workspace_paths.append(workspace_path)
 
         async def fake_query(**kwargs):
             yield _result_message()
@@ -256,6 +258,7 @@ class TestAgentRunner:
         assert result.status == "completed"
         assert len(transcript_paths) == 1
         assert "s1" in transcript_paths[0]  # session_id from _result_message
+        assert workspace_paths[0]  # workspace_path should be set
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")
@@ -264,7 +267,7 @@ class TestAgentRunner:
         from claude_agent_sdk import SystemMessage
         transcript_paths = []
 
-        async def on_transcript(path):
+        async def on_transcript(path, workspace_path=""):
             transcript_paths.append(path)
 
         async def fake_query(**kwargs):

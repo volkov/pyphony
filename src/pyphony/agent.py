@@ -317,7 +317,7 @@ class AgentRunner:
                                 run_attempt.transcript_path = tp
                                 transcript_notified = True
                                 try:
-                                    await on_transcript(tp)
+                                    await on_transcript(tp, workspace.path)
                                 except Exception:
                                     log.warning(
                                         "on_transcript_callback_failed",

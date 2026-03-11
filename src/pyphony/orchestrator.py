@@ -51,7 +51,7 @@ def _build_transcript_url(base_url: str, transcript_path: str) -> str | None:
 def _build_transcript_comment(
     transcript_url: str,
     transcript_path: str,
-    entry: RunningEntry,
+    workspace_path: str = "",
 ) -> str:
     """Build a human-friendly comment about a running agent session.
 
@@ -59,7 +59,6 @@ def _build_transcript_comment(
     the session from a terminal.
     """
     session_id = os.path.splitext(os.path.basename(transcript_path))[0]
-    workspace_path = entry.attempt.workspace_path
 
     lines = [
         f"Agent started. [Transcript]({transcript_url})",
@@ -278,14 +277,14 @@ class Orchestrator:
             entry.worker_task = task
 
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
-        async def _post_transcript_comment(transcript_path: str) -> None:
+        async def _post_transcript_comment(transcript_path: str, workspace_path: str = "") -> None:
             """Post a comment with the transcript link as soon as it's available."""
             transcript_url = _build_transcript_url(
                 self._config.server.explorer_base_url, transcript_path
             )
             if transcript_url:
                 body = _build_transcript_comment(
-                    transcript_url, transcript_path, entry,
+                    transcript_url, transcript_path, workspace_path,
                 )
                 try:
                     await self._tracker.comment_on_issue(issue.id, body)
