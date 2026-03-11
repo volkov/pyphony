@@ -108,6 +108,11 @@ class _WorkflowContext:
             excluded_issue_ids_fn=self._draining_issue_ids,
             peer_running_fn=self._peer_running_count,
         )
+        # Inherit exit_on_merge settings from previous generation
+        if current.orchestrator.exit_on_merge:
+            new_orchestrator.exit_on_merge = True
+            new_orchestrator.merge_detected_event = current.orchestrator.merge_detected_event
+
         gen = _ProcessorGeneration(
             orchestrator=new_orchestrator,
             agent_runner=new_agent_runner,
@@ -289,11 +294,19 @@ async def _run_service(args: argparse.Namespace) -> None:
         # below will wait for ALL orchestrators to finish before setting
         # stop_event.
         merge_trigger = asyncio.Event()
+        has_restart_orchestrators = False
         for ctx in contexts:
+            if not ctx.orchestrator._config.supervisor_restart:
+                continue
+            has_restart_orchestrators = True
             for orch in ctx.all_orchestrators:
                 orch.exit_on_merge = True
                 orch.merge_detected_event = merge_trigger
-        log.info("exit_on_merge_enabled")
+        if has_restart_orchestrators:
+            log.info("exit_on_merge_enabled")
+        else:
+            log.info("exit_on_merge_skipped_no_supervisor_restart_workflows")
+            exit_on_merge = False
 
         async def _drain_coordinator() -> None:
             """Wait for any orchestrator to signal merge, drain all, then stop."""

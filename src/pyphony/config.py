@@ -163,6 +163,7 @@ def service_config_from_workflow(
         server=ServerConfig(
             port=s.get("port") if isinstance(s.get("port"), int) else None,
         ),
+        supervisor_restart=bool(config.get("supervisor_restart", False)),
     )
 
 

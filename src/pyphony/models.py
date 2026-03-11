@@ -101,6 +101,7 @@ class ServiceConfig(BaseModel):
     codex: CodexConfig = Field(default_factory=CodexConfig)
     automerge: AutomergeConfig = Field(default_factory=AutomergeConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
+    supervisor_restart: bool = False
 
 
 class MergeInfo(BaseModel):

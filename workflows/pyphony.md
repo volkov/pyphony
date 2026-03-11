@@ -14,6 +14,7 @@ agent:
 codex:
   command: claude
   stall_timeout_ms: 1800000
+supervisor_restart: true
 ---
 Ты работаешь над {{ issue.identifier }}: {{ issue.title }}
 
