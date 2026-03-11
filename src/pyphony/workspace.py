@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from pyphony.errors import HookError, HookTimeoutError
-from pyphony.models import ServiceConfig, Workspace
+from pyphony.models import MergeInfo, ServiceConfig, Workspace
 from pyphony.normalization import sanitize_workspace_key
 
 logger = logging.getLogger(__name__)
@@ -213,17 +213,18 @@ class WorkspaceManager:
     # rebase onto main
     # ------------------------------------------------------------------
 
-    async def rebase_branch_onto_main(self, identifier: str) -> bool:
+    async def rebase_branch_onto_main(self, identifier: str) -> MergeInfo | None:
         """Rebase the worktree branch onto main and fast-forward main.
 
         Must be called *before* ``cleanup_workspace`` (the worktree must
         still exist so that git can rebase in it).
 
-        Returns ``True`` if main was successfully updated, ``False``
-        otherwise (conflicts, missing worktree, directory mode, etc.).
+        Returns a :class:`MergeInfo` with the commit SHA and diffstat on
+        success, or ``None`` on failure (conflicts, missing worktree,
+        directory mode, etc.).
         """
         if self._repo is None:
-            return False
+            return None
 
         workspace_key = sanitize_workspace_key(identifier)
         workspace_path = (self._workspace_root / workspace_key).resolve()
@@ -233,7 +234,15 @@ class WorkspaceManager:
             logger.warning(
                 "rebase_skipped: worktree %s does not exist", workspace_path
             )
-            return False
+            return None
+
+        # Capture main HEAD before merge so we can compute diffstat later.
+        try:
+            old_main_sha = await self._run_git(
+                "rev-parse", "main", cwd=self._repo
+            )
+        except (HookError, HookTimeoutError):
+            old_main_sha = None
 
         # Step 1: Rebase the branch onto main inside the worktree.
         try:
@@ -247,7 +256,7 @@ class WorkspaceManager:
                 await self._run_git("rebase", "--abort", cwd=workspace_path)
             except Exception:
                 pass
-            return False
+            return None
 
         # Step 2: Fast-forward main to the rebased branch tip.
         try:
@@ -260,10 +269,28 @@ class WorkspaceManager:
                 exc,
                 branch_name,
             )
-            return False
+            return None
+
+        # Collect merge details for the caller.
+        try:
+            new_main_sha = await self._run_git(
+                "rev-parse", "main", cwd=self._repo
+            )
+        except (HookError, HookTimeoutError):
+            new_main_sha = "unknown"
+
+        diffstat = ""
+        if old_main_sha:
+            try:
+                diffstat = await self._run_git(
+                    "diff", "--stat", f"{old_main_sha}..{new_main_sha}",
+                    cwd=self._repo,
+                )
+            except (HookError, HookTimeoutError):
+                pass
 
         logger.info("branch %s rebased and merged into main", branch_name)
-        return True
+        return MergeInfo(commit_sha=new_main_sha, diffstat=diffstat)
 
     # ------------------------------------------------------------------
     # cleanup

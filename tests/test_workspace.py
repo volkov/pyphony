@@ -347,7 +347,9 @@ async def test_rebase_branch_onto_main_success(tmp_path):
     )
 
     result = await mgr.rebase_branch_onto_main("SER-60")
-    assert result is True
+    assert result is not None
+    assert len(result.commit_sha) >= 7
+    assert "feature.txt" in result.diffstat
 
     # Main should now contain the commit
     log_out = subprocess.run(
@@ -403,7 +405,7 @@ async def test_rebase_branch_onto_main_conflict(tmp_path):
     )
 
     result = await mgr.rebase_branch_onto_main("SER-61")
-    assert result is False
+    assert result is None
 
     # Branch should still exist untouched
     branches = subprocess.run(
@@ -420,7 +422,7 @@ async def test_rebase_noop_when_no_repo(tmp_path):
     """In directory mode (no repo), rebase is a no-op returning False."""
     mgr = WorkspaceManager(_config(tmp_path))
     result = await mgr.rebase_branch_onto_main("SER-62")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.asyncio
@@ -432,7 +434,7 @@ async def test_rebase_missing_worktree(tmp_path):
 
     mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
     result = await mgr.rebase_branch_onto_main("SER-63")
-    assert result is False
+    assert result is None
 
 
 @pytest.mark.asyncio

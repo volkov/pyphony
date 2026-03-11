@@ -98,6 +98,13 @@ class ServiceConfig(BaseModel):
     server: ServerConfig = Field(default_factory=ServerConfig)
 
 
+class MergeInfo(BaseModel):
+    """Details about a direct merge (rebase onto main, no PR)."""
+
+    commit_sha: str
+    diffstat: str  # raw ``git diff --stat`` output
+
+
 class Workspace(BaseModel):
     path: str
     workspace_key: str
