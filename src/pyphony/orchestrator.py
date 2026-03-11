@@ -387,8 +387,9 @@ class Orchestrator:
         plan_text = getattr(entry.attempt, "plan_text", None)
         issue_labels_norm = [normalize_label(label) for label in entry.issue.labels]
         is_plan_required = "plan required" in issue_labels_norm
+        is_research = "research" in issue_labels_norm
 
-        if is_plan_required and plan_text:
+        if (is_plan_required or is_research) and plan_text:
             comment_body = plan_text
         elif result:
             comment_body = result
@@ -414,15 +415,16 @@ class Orchestrator:
 
         # Transition issue based on completion and review requirements
         plan_required = is_plan_required
+        research = is_research
         done_signaled = normal and result and "[DONE]" in result
 
-        # For plan-required issues, a normal exit is sufficient to trigger
-        # the transition — the agent may not include [DONE] in its result.
+        # For plan-required and research issues, a normal exit is sufficient to
+        # trigger the transition — the agent may not include [DONE] in its result.
         # Check for resolve-conflict label — agents dispatched for conflict
         # resolution follow a similar flow to plan-required.
         resolve_conflict = "resolve conflict" in issue_labels_norm
 
-        if done_signaled or (normal and plan_required) or (normal and resolve_conflict):
+        if done_signaled or (normal and plan_required) or (normal and research) or (normal and resolve_conflict):
             review_required = "review required" in issue_labels_norm
             merge_conflict = False
 
@@ -441,6 +443,26 @@ class Orchestrator:
                 except Exception as exc:
                     log.warning(
                         "plan_label_swap_failed",
+                        issue_identifier=entry.issue.identifier,
+                        error=str(exc),
+                    )
+
+                target_state = "In Review"
+            elif research:
+                # Research is complete — swap labels and move to In Review
+                try:
+                    await self._tracker.replace_issue_labels(
+                        issue_id,
+                        remove_labels=["research"],
+                        add_labels=["with research"],
+                    )
+                    log.info(
+                        "research_labels_swapped",
+                        issue_identifier=entry.issue.identifier,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "research_label_swap_failed",
                         issue_identifier=entry.issue.identifier,
                         error=str(exc),
                     )
@@ -625,9 +647,10 @@ class Orchestrator:
             if self.exit_on_merge and target_state == "Done":
                 self._enter_drain_mode(entry.issue.identifier)
 
-            # Plan-required or merge-conflict work is complete — release claim
-            # and skip retries to prevent re-dispatch on the next poll cycle.
-            if plan_required or merge_conflict:
+            # Plan-required, research, or merge-conflict work is complete —
+            # release claim and skip retries to prevent re-dispatch on the
+            # next poll cycle.
+            if plan_required or research or merge_conflict:
                 self._release_claim(issue_id)
                 return
 

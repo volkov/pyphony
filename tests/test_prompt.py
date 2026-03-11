@@ -154,6 +154,39 @@ class TestRenderPrompt:
         assert "Alice" in result
         assert "plan required" in result
 
+    def test_research_label_appends_research_instructions(self) -> None:
+        issue = _make_issue(labels=["research"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "Work on ENG-123" in result
+        assert "research" in result
+        assert "НЕ" in result  # "Do NOT write code"
+        assert "[DONE]" in result
+
+    def test_research_case_insensitive(self) -> None:
+        issue = _make_issue(labels=["Research"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "research" in result
+        assert "НЕ" in result
+
+    def test_no_research_suffix_without_label(self) -> None:
+        issue = _make_issue(labels=["backend", "urgent"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "исследовать" not in result.lower() or "research" not in result
+
+    def test_plan_required_takes_priority_over_research(self) -> None:
+        """When both labels present, plan required should take priority."""
+        issue = _make_issue(labels=["plan required", "research"])
+        result = render_prompt("Work on {{ issue.identifier }}", issue)
+        assert "plan required" in result
+        assert "собирай информацию" not in result
+
+    def test_research_with_comments(self) -> None:
+        issue = _make_issue(labels=["research"])
+        comments = [{"user": "Alice", "created_at": "2025-01-01", "body": "context"}]
+        result = render_prompt("{{ issue.identifier }}", issue, comments=comments)
+        assert "Alice" in result
+        assert "research" in result
+
     def test_resolve_conflict_label_appends_conflict_instructions(self) -> None:
         issue = _make_issue(labels=["resolve-conflict"])
         result = render_prompt("Work on {{ issue.identifier }}", issue)

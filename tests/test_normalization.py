@@ -63,6 +63,12 @@ class TestNormalizeLabel:
     def test_review_required_hyphenated(self):
         assert normalize_label("review-required") == "review required"
 
+    def test_research(self):
+        assert normalize_label("Research") == "research"
+
+    def test_research_already_normalized(self):
+        assert normalize_label("research") == "research"
+
 
 class TestSortIssuesForDispatch:
     def _make_issue(
