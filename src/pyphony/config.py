@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 
 from .models import (
     AgentConfig,
+    AutomergeConfig,
     CodexConfig,
     HooksConfig,
     PollingConfig,
@@ -66,6 +67,7 @@ def service_config_from_workflow(
     h = config.get("hooks") or {}
     a = config.get("agent") or {}
     c = config.get("codex") or {}
+    am = config.get("automerge") or {}
     s = config.get("server") or {}
 
     # --- tracker api key (env-var resolve + Linear fallback) ---
@@ -154,6 +156,9 @@ def service_config_from_workflow(
             turn_timeout_ms=_int(c.get("turn_timeout_ms"), 3600000),
             stall_timeout_ms=_int(c.get("stall_timeout_ms"), 300000),
             **codex_extra,
+        ),
+        automerge=AutomergeConfig(
+            parse_transcript_prs=bool(am.get("parse_transcript_prs", False)),
         ),
         server=ServerConfig(
             port=s.get("port") if isinstance(s.get("port"), int) else None,

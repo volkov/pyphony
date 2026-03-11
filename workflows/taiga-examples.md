@@ -14,6 +14,8 @@ agent:
 codex:
   command: claude
   stall_timeout_ms: 1800000
+automerge:
+  parse_transcript_prs: true
 ---
 Ты работаешь над {{ issue.identifier }}: {{ issue.title }}
 

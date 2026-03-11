@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 import structlog
 
-from .automerge import try_automerge_pr
+from .automerge import extract_pr_urls_from_transcript, try_automerge_pr
 
 from .config import service_config_from_workflow, validate_dispatch_config
 from .models import (
@@ -491,6 +491,19 @@ class Orchestrator:
                 target_state = "Done"
                 try:
                     pr_urls = await self._tracker.fetch_issue_pr_urls(issue_id)
+                    if (
+                        not pr_urls
+                        and self._config.automerge.parse_transcript_prs
+                    ):
+                        pr_urls = extract_pr_urls_from_transcript(
+                            entry.attempt.transcript_path,
+                        )
+                        if pr_urls:
+                            log.info(
+                                "automerge_pr_urls_from_transcript",
+                                issue_identifier=entry.issue.identifier,
+                                pr_urls=pr_urls,
+                            )
                     for pr_url in pr_urls:
                         merged = await try_automerge_pr(pr_url)
                         log.info(
@@ -537,6 +550,19 @@ class Orchestrator:
                 conflict_pr_url: str | None = None
                 try:
                     pr_urls = await self._tracker.fetch_issue_pr_urls(issue_id)
+                    if (
+                        not pr_urls
+                        and self._config.automerge.parse_transcript_prs
+                    ):
+                        pr_urls = extract_pr_urls_from_transcript(
+                            entry.attempt.transcript_path,
+                        )
+                        if pr_urls:
+                            log.info(
+                                "automerge_pr_urls_from_transcript",
+                                issue_identifier=entry.issue.identifier,
+                                pr_urls=pr_urls,
+                            )
                     for pr_url in pr_urls:
                         merged = await try_automerge_pr(pr_url)
                         log.info(

@@ -83,6 +83,10 @@ class CodexConfig(BaseModel):
     system_prompt: str | None = None
 
 
+class AutomergeConfig(BaseModel):
+    parse_transcript_prs: bool = False
+
+
 class ServerConfig(BaseModel):
     port: int | None = None
     explorer_base_url: str = "http://localhost:3939"
@@ -95,6 +99,7 @@ class ServiceConfig(BaseModel):
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
     codex: CodexConfig = Field(default_factory=CodexConfig)
+    automerge: AutomergeConfig = Field(default_factory=AutomergeConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
 
 
