@@ -698,33 +698,26 @@ class TestBuildTranscriptUrl:
 
 class TestBuildTranscriptComment:
     def test_includes_transcript_link(self):
-        entry = _running_entry(_make_issue())
         body = _build_transcript_comment(
             "http://localhost:3939/#/session/proj/abc-123",
             "/home/user/.claude/projects/proj/abc-123.jsonl",
-            entry,
         )
         assert "Agent started" in body
         assert "[Transcript](http://localhost:3939/#/session/proj/abc-123)" in body
 
     def test_includes_resume_instructions_when_workspace_set(self):
-        entry = _running_entry(_make_issue())
-        entry.attempt.workspace_path = "/home/user/my-project"
         body = _build_transcript_comment(
             "http://localhost:3939/#/session/proj/abc-123",
             "/home/user/.claude/projects/proj/abc-123.jsonl",
-            entry,
+            workspace_path="/home/user/my-project",
         )
         assert "cd /home/user/my-project" in body
         assert "claude --resume abc-123" in body
 
     def test_no_resume_instructions_without_workspace(self):
-        entry = _running_entry(_make_issue())
-        entry.attempt.workspace_path = None
         body = _build_transcript_comment(
             "http://localhost:3939/#/session/proj/abc-123",
             "/home/user/.claude/projects/proj/abc-123.jsonl",
-            entry,
         )
         assert "cd " not in body
         assert "--resume" not in body
@@ -745,7 +738,7 @@ class TestTranscriptCommentDuringRun:
         # Fake agent function that calls on_transcript callback
         async def fake_agent_fn(issue, attempt, on_transcript=None):
             if on_transcript:
-                await on_transcript(transcript_path)
+                await on_transcript(transcript_path, "/home/user/my-project")
             return RunAttempt(
                 issue_id=issue.id,
                 issue_identifier=issue.identifier,
@@ -787,7 +780,7 @@ class TestTranscriptCommentDuringRun:
         async def fake_agent_fn(issue, attempt, on_transcript=None):
             nonlocal callback_called
             if on_transcript:
-                await on_transcript("/some/path/proj/sess.jsonl")
+                await on_transcript("/some/path/proj/sess.jsonl", "/some/workspace")
                 callback_called = True
             return RunAttempt(
                 issue_id=issue.id,
