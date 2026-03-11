@@ -306,6 +306,9 @@ class Orchestrator:
                 issue, entry.attempt.attempt,
                 on_transcript=_post_transcript_comment,
             )
+            # Propagate plan_text from agent's RunAttempt to orchestrator's
+            if hasattr(result, "plan_text") and result.plan_text:
+                entry.attempt.plan_text = result.plan_text
             if hasattr(result, "status") and result.status == "failed":
                 log.error(
                     "worker_failed",
