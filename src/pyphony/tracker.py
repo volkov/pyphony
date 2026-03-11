@@ -17,6 +17,7 @@ from .models import BlockerRef, Issue, ServiceConfig
 import structlog
 
 from .tracker_queries import (
+    ATTACHMENT_CREATE_MUTATION,
     CANDIDATE_ISSUES_QUERY,
     COMMENT_CREATE_MUTATION,
     ISSUE_ATTACHMENTS_QUERY,
@@ -197,6 +198,34 @@ class LinearClient:
             if url and ("github.com" in url) and ("/pull/" in url):
                 urls.append(url)
         return urls
+
+    async def attach_pr_to_issue(
+        self, issue_id: str, pr_url: str, *, title: str | None = None
+    ) -> bool:
+        """Attach a GitHub PR URL to an issue.
+
+        Creates a generic attachment so that ``fetch_issue_pr_urls`` picks it up
+        on subsequent calls. The operation is idempotent — Linear silently
+        ignores duplicate (issueId, url) pairs.
+
+        Returns ``True`` if the attachment was created successfully.
+        """
+        if title is None:
+            # Derive a short title from the URL, e.g. "owner/repo#123"
+            parts = pr_url.rstrip("/").split("/")
+            try:
+                pr_number = parts[-1]
+                repo = parts[-3]
+                owner = parts[-4]
+                title = f"{owner}/{repo}#{pr_number}"
+            except (IndexError, ValueError):
+                title = pr_url
+
+        data = await self._execute(
+            ATTACHMENT_CREATE_MUTATION,
+            {"issueId": issue_id, "url": pr_url, "title": title},
+        )
+        return data.get("attachmentCreate", {}).get("success", False)
 
     async def fetch_issue_comments(self, issue_id: str) -> list[dict]:
         """Fetch comments on an issue. Returns list of dicts with body, createdAt, user."""

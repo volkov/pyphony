@@ -1069,3 +1069,85 @@ class TestUpdateIssue:
                 await client.update_issue("SER-27", state="Nonexistent")
             finally:
                 await client.close()
+
+
+class TestAttachPrToIssue:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_attach_pr_success(self):
+        route = respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(200, json={
+                "data": {
+                    "attachmentCreate": {
+                        "success": True,
+                        "attachment": {
+                            "id": "att-1",
+                            "url": "https://github.com/org/repo/pull/42",
+                            "title": "org/repo#42",
+                        },
+                    }
+                }
+            })
+        )
+        client = LinearClient(_make_config())
+        try:
+            result = await client.attach_pr_to_issue(
+                "issue-1", "https://github.com/org/repo/pull/42"
+            )
+            assert result is True
+            assert route.called
+            body = route.calls[0].request.content
+            import json
+            payload = json.loads(body)
+            assert payload["variables"]["issueId"] == "issue-1"
+            assert payload["variables"]["url"] == "https://github.com/org/repo/pull/42"
+            assert payload["variables"]["title"] == "org/repo#42"
+        finally:
+            await client.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_attach_pr_custom_title(self):
+        route = respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(200, json={
+                "data": {
+                    "attachmentCreate": {
+                        "success": True,
+                        "attachment": {"id": "att-2", "url": "u", "title": "My PR"},
+                    }
+                }
+            })
+        )
+        client = LinearClient(_make_config())
+        try:
+            result = await client.attach_pr_to_issue(
+                "issue-1", "https://github.com/org/repo/pull/7", title="My PR"
+            )
+            assert result is True
+            import json
+            payload = json.loads(route.calls[0].request.content)
+            assert payload["variables"]["title"] == "My PR"
+        finally:
+            await client.close()
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_attach_pr_failure(self):
+        respx.post(ENDPOINT).mock(
+            return_value=httpx.Response(200, json={
+                "data": {
+                    "attachmentCreate": {
+                        "success": False,
+                        "attachment": None,
+                    }
+                }
+            })
+        )
+        client = LinearClient(_make_config())
+        try:
+            result = await client.attach_pr_to_issue(
+                "issue-1", "https://github.com/org/repo/pull/1"
+            )
+            assert result is False
+        finally:
+            await client.close()
