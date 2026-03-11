@@ -20,10 +20,10 @@ Use this skill when the user asks to update, change, or modify a task/issue in L
 4. Run the CLI command:
 
 ```
-uv run python -m pyphony update-issue WORKFLOW.md --identifier "SER-27" --title "New title" --description "New description" --state "In Progress"
+./pyphony update-issue SER-27 --title "New title" --description "New description" --state "In Progress"
 ```
 
-Only include the flags for fields that need to change. The command reads `WORKFLOW.md` for the Linear API key and project slug, then updates the issue via the Linear GraphQL API.
+Only include the flags for fields that need to change. The command reads the default `WORKFLOW.md` for the Linear API key and project slug, then updates the issue via the Linear GraphQL API.
 
 5. The command outputs JSON with `id`, `identifier`, `title`, `description`, `state`, and `url` of the updated issue.
 6. Show the user the result confirming what was updated.
@@ -37,7 +37,7 @@ $ARGUMENTS — should contain the issue identifier and fields to update. Parse i
 User: "переведи задачу SER-27 в Done"
 
 ```bash
-uv run python -m pyphony update-issue WORKFLOW.md --identifier "SER-27" --state "Done"
+./pyphony update-issue SER-27 --state "Done"
 ```
 
 Output:

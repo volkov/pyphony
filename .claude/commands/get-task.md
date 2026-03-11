@@ -18,10 +18,10 @@ Use this skill when the user asks to read, show, or get a task/issue from Linear
 3. Run the CLI command:
 
 ```
-uv run python -m pyphony get-issue WORKFLOW.md --identifier "SER-27"
+./pyphony get-issue SER-27
 ```
 
-The command reads `WORKFLOW.md` for the Linear API key and project slug, then fetches the issue via the Linear GraphQL API.
+The command reads the default `WORKFLOW.md` for the Linear API key and project slug, then fetches the issue via the Linear GraphQL API.
 
 4. The command outputs JSON with `id`, `identifier`, `title`, `description`, `state`, and `url` of the issue.
 5. Show the user the result in a readable format.
@@ -35,7 +35,7 @@ $ARGUMENTS — should contain the issue identifier (e.g. SER-27). Parse it to ex
 User: "покажи задачу SER-27"
 
 ```bash
-uv run python -m pyphony get-issue WORKFLOW.md --identifier "SER-27"
+./pyphony get-issue SER-27
 ```
 
 Output:

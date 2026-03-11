@@ -6,7 +6,7 @@ Python-реализация [Symphony Service Specification](SPEC.md) — long-r
 
 ```bash
 uv sync
-uv run python -m pyphony WORKFLOW.md
+./pyphony run WORKFLOW.md
 ```
 
 ## WORKFLOW.md
@@ -49,9 +49,15 @@ codex:
 ## CLI
 
 ```bash
-uv run python -m pyphony WORKFLOW.md              # запуск
-uv run python -m pyphony --port 8080 WORKFLOW.md   # с HTTP сервером
-uv run python -m pyphony --log-level DEBUG w.md    # verbose логи
+./pyphony run WORKFLOW.md                          # запуск
+./pyphony run --port 8080 WORKFLOW.md              # с HTTP сервером
+./pyphony run --log-level DEBUG w.md               # verbose логи
+./pyphony get-issue SER-52                         # получить задачу
+./pyphony update-issue SER-52 --state "Done"       # обновить задачу
+./pyphony create-issue --title "..."               # создать задачу
+./pyphony list-candidates                          # кандидаты на dispatch
+./pyphony check-issue SER-52                       # диагностика dispatch
+./pyphony prompt-view SER-52                       # показать промпт
 ```
 
 ## Тесты

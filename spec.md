@@ -71,11 +71,14 @@ Jinja2 prompt template с {{ issue.identifier }}, {{ issue.title }} и т.д.
 ## CLI
 
 ```bash
-pyphony run WORKFLOW.md              # Запуск сервиса
-pyphony list-candidates WORKFLOW.md  # Показать кандидатов на dispatch
-pyphony check-issue WORKFLOW.md SER-1 # Почему задача не диспатчится
-pyphony create-issue WORKFLOW.md --title "..." # Создать задачу
-pyphony-sv WORKFLOW.md               # Supervisor: рестарт при merge
+./pyphony run WORKFLOW.md              # Запуск сервиса
+./pyphony list-candidates              # Показать кандидатов на dispatch
+./pyphony check-issue SER-1            # Почему задача не диспатчится
+./pyphony get-issue SER-1              # Получить задачу из Linear
+./pyphony create-issue --title "..."   # Создать задачу
+./pyphony update-issue SER-1 --state "Done"  # Обновить задачу
+./pyphony prompt-view SER-1            # Показать промпт для задачи
+pyphony-sv WORKFLOW.md                 # Supervisor: рестарт при merge
 ```
 
 ## Дополнительные компоненты
