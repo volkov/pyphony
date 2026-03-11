@@ -2039,3 +2039,53 @@ class TestGracefulDrain:
         assert orch.merge_detected
         assert orch.merge_detected_event.is_set()
         assert stats["running"] == 0
+
+    @pytest.mark.asyncio
+    async def test_drain_waits_for_post_completion_http_calls(self, tmp_path):
+        """Issue stays in running during post-completion HTTP calls so drain
+        coordinator does not close the tracker client prematurely (SER-63)."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+        orch.exit_on_merge = True
+        orch.merge_detected_event = asyncio.Event()
+
+        issue = _make_issue()
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        # Track whether the issue was still in running when each HTTP call
+        # was made.  If the issue was already popped, the drain coordinator
+        # could close the client before these calls finish.
+        in_running_during_comment: list[bool] = []
+        in_running_during_transition: list[bool] = []
+
+        original_comment = AsyncMock(return_value=True)
+        original_transition = AsyncMock(return_value=True)
+
+        async def _recording_comment(*args, **kwargs):
+            in_running_during_comment.append(issue.id in orch.state.running)
+            return await original_comment(*args, **kwargs)
+
+        async def _recording_transition(*args, **kwargs):
+            in_running_during_transition.append(issue.id in orch.state.running)
+            return await original_transition(*args, **kwargs)
+
+        with patch.object(tracker, "comment_on_issue", side_effect=_recording_comment), \
+             patch.object(tracker, "transition_issue", side_effect=_recording_transition), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+        # The issue must have been in running during all HTTP calls
+        assert in_running_during_comment and all(in_running_during_comment), \
+            "Issue was removed from running before comment HTTP call finished"
+        assert in_running_during_transition and all(in_running_during_transition), \
+            "Issue was removed from running before transition HTTP call finished"
+
+        # Drain should still complete after everything is done
+        assert orch._draining
+        assert orch.merge_detected
+        assert orch.merge_detected_event.is_set()
+        # Issue should be removed from running after completion
+        assert issue.id not in orch.state.running
