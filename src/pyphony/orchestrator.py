@@ -1065,6 +1065,10 @@ class Orchestrator:
                     issue_identifier=entry.issue.identifier,
                 )
                 await self._kill_worker(issue_id)
+                await self._post_kill_comment(
+                    issue_id,
+                    "Agent killed: 'workflow issue' label detected",
+                )
                 self._state.running.pop(issue_id, None)
                 self._release_claim(issue_id)
                 continue
@@ -1078,6 +1082,10 @@ class Orchestrator:
                     state=current_state,
                 )
                 await self._kill_worker(issue_id)
+                await self._post_kill_comment(
+                    issue_id,
+                    f"Agent killed: issue reached terminal state '{current_state}'",
+                )
                 self._state.running.pop(issue_id, None)
                 self._release_claim(issue_id)
                 await self._workspace_mgr.cleanup_workspace(entry.issue.identifier)
@@ -1090,6 +1098,10 @@ class Orchestrator:
                     state=current_state,
                 )
                 await self._kill_worker(issue_id)
+                await self._post_kill_comment(
+                    issue_id,
+                    f"Agent killed: issue moved to non-active state '{current_state}'",
+                )
                 self._state.running.pop(issue_id, None)
                 self._release_claim(issue_id)
 
@@ -1112,6 +1124,27 @@ class Orchestrator:
                     issue_identifier=issue.identifier,
                     error=str(exc),
                 )
+
+    async def _post_kill_comment(
+        self, issue_id: str, reason: str
+    ) -> None:
+        """Post a Linear comment explaining why the agent was killed."""
+        entry = self._state.running.get(issue_id)
+        identifier = entry.issue.identifier if entry else issue_id
+        comment_body = f"⚠️ {reason}"
+        try:
+            await self._tracker.comment_on_issue(issue_id, comment_body)
+            log.info(
+                "kill_comment_posted",
+                issue_identifier=identifier,
+                reason=reason,
+            )
+        except Exception as exc:
+            log.warning(
+                "kill_comment_post_failed",
+                issue_identifier=identifier,
+                error=str(exc),
+            )
 
     async def _kill_worker(self, issue_id: str) -> None:
         entry = self._state.running.get(issue_id)
