@@ -17,7 +17,7 @@ from pyphony.models import (
     TrackerConfig,
     WorkspaceConfig,
 )
-from pyphony.models import MergeInfo
+from pyphony.models import MergeInfo, Workspace
 from pyphony.orchestrator import Orchestrator, _build_merge_comment, _build_transcript_url, _build_transcript_comment
 from pyphony.tracker import LinearClient
 from pyphony.workspace import WorkspaceManager
@@ -2359,3 +2359,117 @@ class TestMergeCommentPosted:
         # Only the agent result comment, no merge comment
         assert len(posted_bodies) == 1
         assert "[DONE]" in posted_bodies[0]
+
+
+class TestInteractiveMode:
+    """Tests for the 'interactive' label flow in _dispatch."""
+
+    @pytest.mark.asyncio
+    async def test_interactive_label_posts_comment_and_moves_to_review(self, tmp_path):
+        """Issue with 'interactive' label should not launch agent,
+        post a comment with instructions, and transition to In Review."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+
+        agent_called = False
+
+        async def fake_agent(issue, attempt, on_transcript=None):
+            nonlocal agent_called
+            agent_called = True
+            return RunAttempt(
+                issue_id=issue.id,
+                issue_identifier=issue.identifier,
+                status="completed",
+                result="[DONE]",
+            )
+
+        orch = Orchestrator(config, tracker, ws_mgr, run_agent_fn=fake_agent)
+
+        issue = _make_issue(labels=["interactive"])
+        workspace = Workspace(path=str(tmp_path / "ws"), workspace_key="proj-1")
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(ws_mgr, "create_or_reuse", new_callable=AsyncMock, return_value=workspace), \
+             patch.object(ws_mgr, "run_before_run", new_callable=AsyncMock), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(tracker, "comment_on_issue", side_effect=capture_comment) as mock_comment, \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._dispatch(issue)
+
+            # Wait briefly for any async tasks (there should be none)
+            await asyncio.sleep(0.01)
+
+            # Agent should NOT have been called
+            assert not agent_called
+
+            # Comment should contain workspace path and 'claude' command
+            assert len(posted_bodies) == 1
+            assert str(tmp_path / "ws") in posted_bodies[0]
+            assert "claude" in posted_bodies[0]
+            assert "Interactive task" in posted_bodies[0]
+
+            # Labels should be swapped
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["interactive"],
+                add_labels=["interactive-ready"],
+            )
+
+            # Issue should transition to In Review
+            mock_transition.assert_any_call(issue.id, "In Review")
+
+    @pytest.mark.asyncio
+    async def test_interactive_label_swapped(self, tmp_path):
+        """'interactive' label is replaced with 'interactive-ready'."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["Interactive"])  # case-insensitive
+        workspace = Workspace(path=str(tmp_path / "ws"), workspace_key="proj-1")
+
+        with patch.object(ws_mgr, "create_or_reuse", new_callable=AsyncMock, return_value=workspace), \
+             patch.object(ws_mgr, "run_before_run", new_callable=AsyncMock), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._dispatch(issue)
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["interactive"],
+                add_labels=["interactive-ready"],
+            )
+
+    @pytest.mark.asyncio
+    async def test_interactive_does_not_occupy_slot(self, tmp_path):
+        """After handling an interactive issue, claim and running slot are released."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(labels=["interactive"])
+        workspace = Workspace(path=str(tmp_path / "ws"), workspace_key="proj-1")
+
+        with patch.object(ws_mgr, "create_or_reuse", new_callable=AsyncMock, return_value=workspace), \
+             patch.object(ws_mgr, "run_before_run", new_callable=AsyncMock), \
+             patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]), \
+             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._dispatch(issue)
+
+        # Claim and running entry should be released
+        assert issue.id not in orch.state.claimed
+        assert issue.id not in orch.state.running
+        assert issue.id not in orch.state.retry_attempts

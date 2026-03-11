@@ -105,6 +105,7 @@ class _WorkflowContext:
             self.tracker,
             self.workspace_mgr,
             run_agent_fn=new_agent_runner.run,
+            prompt_template=prompt_template,
             excluded_issue_ids_fn=self._draining_issue_ids,
             peer_running_fn=self._peer_running_count,
         )
@@ -265,7 +266,8 @@ async def _run_service(args: argparse.Namespace) -> None:
         workspace_mgr = WorkspaceManager(config)
         agent_runner = AgentRunner(config, workspace_mgr, wf.prompt_template, tracker=tracker)
         orchestrator = Orchestrator(
-            config, tracker, workspace_mgr, run_agent_fn=agent_runner.run
+            config, tracker, workspace_mgr, run_agent_fn=agent_runner.run,
+            prompt_template=wf.prompt_template,
         )
 
         contexts.append(
