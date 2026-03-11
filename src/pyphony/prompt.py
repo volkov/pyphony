@@ -25,6 +25,17 @@ _PLAN_REQUIRED_SUFFIX = """
 Когда готово — напиши детальный план реализации и [DONE] в последнем сообщении.
 """
 
+_RESEARCH_SUFFIX = """
+
+---
+**Этот тикет помечен как «research».**
+Твоя задача — исследовать кодовую базу, собрать необходимую информацию и дать развёрнутый ответ.
+
+**НЕ** пиши код и не вноси изменений в файлы. Только исследуй и собирай информацию.
+
+Когда готово — напиши собранную информацию и [DONE] в последнем сообщении.
+"""
+
 _RESOLVE_CONFLICT_SUFFIX = """
 
 ---
@@ -84,6 +95,8 @@ def render_prompt(
     issue_labels_normalized = [normalize_label(label) for label in issue.labels]
     if "plan required" in issue_labels_normalized:
         rendered += _PLAN_REQUIRED_SUFFIX
+    elif "research" in issue_labels_normalized:
+        rendered += _RESEARCH_SUFFIX
     elif "resolve conflict" in issue_labels_normalized:
         rendered += _RESOLVE_CONFLICT_SUFFIX
 

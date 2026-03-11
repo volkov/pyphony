@@ -49,12 +49,21 @@ The command reads `WORKFLOW.md` for the Linear API key and project slug, then cr
 
 ## When to add `plan required` label
 
-Add the `plan required` label when the task is about **research, investigation, or planning** rather than direct code execution. Examples:
-- "исследовать варианты...", "разобраться как...", "спланировать..."
-- "investigate", "explore options", "design approach"
+Add the `plan required` label when the task is about **planning an implementation** rather than direct code execution. Examples:
+- "спланировать реализацию...", "составить план..."
+- "design approach", "plan implementation"
 - User explicitly asks for a plan ("создай задачу на plan")
 
-With this label, the agent will produce a plan and post it as a comment instead of executing changes directly.
+With this label, the agent will produce an implementation plan and post it as a comment instead of executing changes directly.
+
+## When to add `research` label
+
+Add the `research` label when the task is about **researching and gathering information** rather than writing code or creating plans. Examples:
+- "исследовать варианты...", "разобраться как...", "собрать информацию..."
+- "investigate", "explore options", "research how X works"
+- User explicitly asks for research ("создай задачу на research")
+
+With this label, the agent will research the codebase, gather the requested information, and post it as a comment instead of executing changes directly.
 
 ## Arguments
 

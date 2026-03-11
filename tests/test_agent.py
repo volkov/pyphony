@@ -355,6 +355,47 @@ class TestAgentRunner:
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")
+    async def test_research_text_extracted_from_transcript(self, mock_query, service_config, issue):
+        """For research issues, plan_text is extracted from transcript."""
+        issue.labels = ["research"]
+
+        async def fake_query(**kwargs):
+            yield _result_message(result="Short summary [DONE]")
+
+        mock_query.side_effect = fake_query
+        runner = _make_runner(service_config)
+
+        with patch("pyphony.agent._extract_plan_from_transcript") as mock_extract:
+            mock_extract.return_value = "## Research Findings\n\n1. Finding A\n2. Finding B"
+            result = await runner.run(issue, attempt=0)
+
+        assert result.status == "completed"
+        assert result.plan_text == "## Research Findings\n\n1. Finding A\n2. Finding B"
+
+    @pytest.mark.asyncio
+    @patch("pyphony.agent.query")
+    async def test_research_uses_read_only_tools(self, mock_query, service_config, issue):
+        """Research issues should be restricted to read-only tools."""
+        issue.labels = ["research"]
+        captured_kwargs = {}
+
+        async def fake_query(**kwargs):
+            captured_kwargs.update(kwargs)
+            yield _result_message()
+
+        mock_query.side_effect = fake_query
+        runner = _make_runner(service_config)
+        await runner.run(issue)
+
+        options = captured_kwargs["options"]
+        assert options.permission_mode == "plan"
+        # Should not have Write, Edit, or Bash in allowed_tools
+        allowed = options.allowed_tools or []
+        assert "Write" not in allowed
+        assert "Edit" not in allowed
+
+    @pytest.mark.asyncio
+    @patch("pyphony.agent.query")
     async def test_no_plan_text_for_regular_issues(self, mock_query, service_config, issue):
         """For non-plan-required issues, plan_text should remain None."""
         issue.labels = []

@@ -238,9 +238,12 @@ class AgentRunner:
 
             # 5. Build SDK options (restrict tools for plan-only issues)
             codex = self._config.codex
-            plan_required = "plan required" in [
+            issue_labels_norm = [
                 normalize_label(label) for label in issue.labels
             ]
+            plan_required = "plan required" in issue_labels_norm
+            research = "research" in issue_labels_norm
+            read_only_mode = plan_required or research
 
             # 5a. Snapshot plan files so we can detect new ones after the run
             plans_before: set[str] = set()
@@ -254,8 +257,8 @@ class AgentRunner:
             stderr_file = open(stderr_path, "w")
 
             try:
-                # For "plan required" issues, restrict to read-only tools
-                if plan_required:
+                # For "plan required" and "research" issues, restrict to read-only tools
+                if read_only_mode:
                     plan_allowed_tools = [
                         t for t in (codex.allowed_tools or [])
                         if t in ("Read", "Glob", "Grep", "Agent", "WebSearch", "WebFetch")
@@ -355,6 +358,19 @@ class AgentRunner:
                             issue_identifier=issue.identifier,
                             plan_len=len(plan_text),
                             source=plan_source,
+                        )
+
+                # 8b. For research issues, extract the research text from transcript
+                if research:
+                    research_text = _extract_plan_from_transcript(
+                        run_attempt.transcript_path
+                    )
+                    if research_text:
+                        run_attempt.plan_text = research_text
+                        log.info(
+                            "research_extracted",
+                            issue_identifier=issue.identifier,
+                            research_len=len(research_text),
                         )
             finally:
                 stderr_file.close()

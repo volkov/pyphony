@@ -1537,6 +1537,184 @@ class TestPlanRequired:
             mock_transition.assert_called_once_with(issue.id, "In Review")
 
 
+class TestResearchLabel:
+    """Tests for the 'research' label flow in _on_worker_exit."""
+
+    @pytest.mark.asyncio
+    async def test_research_swaps_labels_and_transitions_in_review(self, tmp_path):
+        """With 'research' label, labels are swapped and issue goes to In Review."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
+             patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my research [DONE]")
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["research"],
+                add_labels=["with research"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+            mock_merge.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_research_case_insensitive(self, tmp_path):
+        """'Research' label matching is case-insensitive."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["Research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_labels.assert_called_once()
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+
+    @pytest.mark.asyncio
+    async def test_research_transitions_without_done_marker(self, tmp_path):
+        """Research issue transitions to In Review on normal exit even without [DONE] marker."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my research")
+
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["research"],
+                add_labels=["with research"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+
+        assert issue.id not in orch.state.claimed
+
+    @pytest.mark.asyncio
+    async def test_research_releases_claim_after_transition(self, tmp_path):
+        """Research completion releases the claim so no retry is scheduled."""
+        config = _make_config(tmp_path)
+        config.agent.max_runs = 3
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Research [DONE]")
+
+        assert issue.id not in orch.state.claimed
+        assert issue.id not in orch.state.retry_attempts
+
+    @pytest.mark.asyncio
+    async def test_research_no_automerge(self, tmp_path):
+        """Research should not trigger automerge."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock) as mock_pr:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            mock_pr.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_research_text_posted_instead_of_result(self, tmp_path):
+        """When plan_text is set on research issue, it should be posted as the comment body."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["research"]
+        entry = _running_entry(issue)
+        entry.attempt.plan_text = "## Research Findings\n\n1. Finding A\n2. Finding B"
+        orch.state.running[issue.id] = entry
+        orch.state.claimed.add(issue.id)
+
+        posted_bodies = []
+
+        async def capture_comment(issue_id, body):
+            posted_bodies.append(body)
+            return True
+
+        with patch.object(tracker, "comment_on_issue", side_effect=capture_comment), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="Short summary [DONE]")
+
+        assert len(posted_bodies) == 1
+        assert posted_bodies[0] == "## Research Findings\n\n1. Finding A\n2. Finding B"
+
+    @pytest.mark.asyncio
+    async def test_plan_required_takes_priority_over_research(self, tmp_path):
+        """When both 'plan required' and 'research' labels are present,
+        'plan required' should take priority."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+        issue.labels = ["plan required", "research"]
+        orch.state.running[issue.id] = _running_entry(issue)
+        orch.state.claimed.add(issue.id)
+
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
+             patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
+            await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
+
+            # plan required takes priority
+            mock_labels.assert_called_once_with(
+                issue.id,
+                remove_labels=["plan required"],
+                add_labels=["with plan"],
+            )
+            mock_transition.assert_called_once_with(issue.id, "In Review")
+
+
 class TestPlanTextPosted:
     """Tests that full plan_text is posted to Linear instead of short result."""
 
