@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view"}
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view", "work"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -62,6 +62,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     prompt_view_parser.add_argument("issue_identifier", help="Issue identifier (e.g. SER-42)")
     _add_common_args(prompt_view_parser)
+
+    # Work — interactive agent session
+    work_parser = subparsers.add_parser(
+        "work", help="Start an interactive Claude session for a Linear issue"
+    )
+    work_parser.add_argument("issue_identifier", help="Issue identifier (e.g. SER-11)")
+    _add_common_args(work_parser)
 
     # Backward compat: if first arg is not a known subcommand, insert "run"
     # so that e.g. `pyphony my_workflow.md` or `pyphony --port 8080` works
@@ -135,6 +142,9 @@ def main() -> None:
     elif args.command == "prompt-view":
         from .prompt_view import prompt_view
         prompt_view(args)
+    elif args.command == "work":
+        from .work import work
+        work(args)
     else:
         from .service import run_service
         run_service(args)
