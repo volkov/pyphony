@@ -240,6 +240,7 @@ class LinearClient:
         comments: list[dict] = []
         for node in (issue_node.get("comments") or {}).get("nodes", []):
             comments.append({
+                "id": node.get("id", ""),
                 "body": node.get("body", ""),
                 "created_at": node.get("createdAt", ""),
                 "user": (node.get("user") or {}).get("name", ""),

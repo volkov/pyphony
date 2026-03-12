@@ -182,5 +182,6 @@ class OrchestratorRuntimeState(BaseModel):
     completed: set[str] = Field(default_factory=set)
     agent_totals: AgentTotals = Field(default_factory=AgentTotals)
     agent_rate_limits: dict[str, Any] = Field(default_factory=dict)
+    processed_bug_reports: set[str] = Field(default_factory=set)
 
     model_config = {"arbitrary_types_allowed": True}
