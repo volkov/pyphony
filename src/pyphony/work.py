@@ -156,7 +156,7 @@ async def _work(args: argparse.Namespace) -> None:
 
         # Use --append-system-prompt to keep Claude Code's default
         # system prompt while adding the task context.
-        cmd = ["claude", "--append-system-prompt", prompt]
+        cmd = ["claude", "--dangerously-skip-permissions", "--append-system-prompt", prompt]
         subprocess.run(cmd, cwd=workspace.path, env=env)
 
         print("\n" + "─" * 60)
