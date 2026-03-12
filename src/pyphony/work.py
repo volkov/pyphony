@@ -13,9 +13,9 @@ Flow:
 6. On exit — post-process:
    a. Find the session transcript
    b. Collect PR URLs (Linear attachments + transcript)
-   c. Offer to merge PRs via ``gh pr merge --squash``
+   c. Auto-merge PRs (unless "review required" label is set)
    d. Post the last assistant message as a comment on the issue
-   e. Transition issue to "Done" if PRs were merged
+   e. Transition to "Done" (or "In Review" if review required)
 """
 
 from __future__ import annotations
@@ -154,7 +154,9 @@ async def _work(args: argparse.Namespace) -> None:
         env = os.environ.copy()
         env.pop("CLAUDECODE", None)
 
-        cmd = ["claude", "--system-prompt", prompt]
+        # Use --append-system-prompt to keep Claude Code's default
+        # system prompt while adding the task context.
+        cmd = ["claude", "--append-system-prompt", prompt]
         subprocess.run(cmd, cwd=workspace.path, env=env)
 
         print("\n" + "─" * 60)
@@ -175,15 +177,21 @@ async def _work(args: argparse.Namespace) -> None:
         pr_urls = await tracker.fetch_issue_pr_urls(issue.id)
         all_pr_urls = list(dict.fromkeys(pr_urls + transcript_pr_urls))
 
-        # ── 9. Merge PRs (with user confirmation) ──────────────────────
+        # ── 9. Check review-required label ─────────────────────────────
+        issue_labels_norm = {l.lower() for l in (issue.labels or [])}
+        review_required = "review required" in issue_labels_norm
+
+        # ── 10. Auto-merge PRs (standard workflow) ─────────────────────
         merged_any = False
         if all_pr_urls:
             print(f"\n🔀 Found {len(all_pr_urls)} PR(s):")
             for url in all_pr_urls:
                 print(f"   • {url}")
 
-            answer = input("\nMerge PRs? [Y/n] ").strip().lower()
-            if answer in ("", "y", "yes"):
+            if review_required:
+                print("\n⏸️  Skipping auto-merge: 'review required' label is set")
+            else:
+                print("\n🔄 Auto-merging PRs...")
                 for url in all_pr_urls:
                     merged = await try_automerge_pr(url)
                     status = "✅ Merged" if merged else "⚠️  Failed to merge"
@@ -191,7 +199,7 @@ async def _work(args: argparse.Namespace) -> None:
                     if merged:
                         merged_any = True
 
-        # ── 10. Post session summary as comment ─────────────────────────
+        # ── 11. Post session summary as comment ─────────────────────────
         if last_message:
             comment_body = f"### Interactive work session\n\n{last_message}"
             print(f"\n💬 Posting session summary to {issue.identifier}...")
@@ -201,12 +209,15 @@ async def _work(args: argparse.Namespace) -> None:
             else:
                 print("   ⚠️  Failed to post comment")
 
-        # ── 11. Transition to Done if PRs merged ───────────────────────
-        if merged_any:
+        # ── 12. Transition issue state ──────────────────────────────────
+        if review_required:
+            print("🔄 Transitioning to 'In Review'...")
+            await tracker.transition_issue(issue.id, "In Review")
+        elif merged_any:
             print("🔄 Transitioning to 'Done'...")
             await tracker.transition_issue(issue.id, "Done")
 
-        # ── 12. Run after_run hook ──────────────────────────────────────
+        # ── 13. Run after_run hook ──────────────────────────────────────
         await workspace_mgr.run_after_run(workspace.path)
 
         print("\n✅ Done!")
