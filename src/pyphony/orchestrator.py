@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 from datetime import datetime, timezone
 
@@ -173,6 +174,9 @@ class Orchestrator:
         except Exception as exc:
             log.error("candidate_fetch_failed", error=str(exc))
             return
+
+        # Process /bug-report commands in comments before dispatching
+        await self._process_bug_report_commands(issues)
 
         sorted_issues = sort_issues_for_dispatch(issues)
         dispatched = 0
@@ -422,6 +426,124 @@ class Orchestrator:
         finally:
             # 7. Release claim — interactive task does not occupy a slot
             self._release_claim(issue.id)
+
+    # ------------------------------------------------------------------
+    # /bug-report comment command processing
+    # ------------------------------------------------------------------
+
+    _BUG_REPORT_RE = re.compile(
+        r"^/bug-report\s+(.+)", re.MULTILINE
+    )
+
+    async def _process_bug_report_commands(self, issues: list[Issue]) -> None:
+        """Scan comments on candidate issues for ``/bug-report`` commands.
+
+        When a ``/bug-report <message>`` comment is found, create a new issue
+        in the same project with labels ``bug`` and ``research``, and a
+        description that instructs the agent to run ``/debug-ticket`` against
+        the source ticket.
+        """
+        for issue in issues:
+            try:
+                comments = await self._tracker.fetch_issue_comments(issue.id)
+            except Exception as exc:
+                log.warning(
+                    "bug_report_fetch_comments_failed",
+                    issue_identifier=issue.identifier,
+                    error=str(exc),
+                )
+                continue
+
+            for comment in comments:
+                comment_id = comment.get("id", "")
+                if not comment_id:
+                    continue
+                if comment_id in self._state.processed_bug_reports:
+                    continue
+
+                body = comment.get("body", "")
+                match = self._BUG_REPORT_RE.search(body)
+                if not match:
+                    # Mark as processed even if no match, to avoid re-scanning
+                    self._state.processed_bug_reports.add(comment_id)
+                    continue
+
+                bug_message = match.group(1).strip()
+                await self._create_bug_report_issue(issue, bug_message)
+                self._state.processed_bug_reports.add(comment_id)
+
+    async def _create_bug_report_issue(
+        self, source_issue: Issue, bug_message: str
+    ) -> None:
+        """Create a bug+research issue triggered by a ``/bug-report`` comment."""
+        title = f"Bug: {bug_message[:120]}"
+        description = (
+            f"Автоматически создано из комментария к тикету "
+            f"**{source_issue.identifier}** ({source_issue.title}).\n\n"
+            f"**Сообщение о проблеме:**\n{bug_message}\n\n"
+            f"---\n"
+            f"Запусти /debug-ticket {source_issue.identifier} и проанализируй "
+            f"проблему, описанную выше."
+        )
+
+        try:
+            result = await self._tracker.create_issue(
+                title=title,
+                description=description,
+                state="Todo",
+            )
+            new_id = result.get("id", "")
+            new_identifier = result.get("identifier", "")
+            log.info(
+                "bug_report_issue_created",
+                source_issue=source_issue.identifier,
+                new_issue=new_identifier,
+                bug_message=bug_message,
+            )
+
+            # Add 'bug' and 'research' labels
+            if new_id:
+                try:
+                    await self._tracker.replace_issue_labels(
+                        new_id,
+                        remove_labels=[],
+                        add_labels=["bug", "research"],
+                    )
+                    log.info(
+                        "bug_report_labels_added",
+                        issue=new_identifier,
+                    )
+                except Exception as exc:
+                    log.warning(
+                        "bug_report_labels_failed",
+                        issue=new_identifier,
+                        error=str(exc),
+                    )
+
+            # Post confirmation comment on the source issue
+            confirm_url = result.get("url", "")
+            confirm_body = (
+                f"🐛 Создан баг-репорт [{new_identifier}]({confirm_url}): "
+                f"{bug_message}"
+            )
+            try:
+                await self._tracker.comment_on_issue(
+                    source_issue.id, confirm_body
+                )
+            except Exception as exc:
+                log.warning(
+                    "bug_report_confirm_comment_failed",
+                    source_issue=source_issue.identifier,
+                    error=str(exc),
+                )
+
+        except Exception as exc:
+            log.error(
+                "bug_report_issue_creation_failed",
+                source_issue=source_issue.identifier,
+                bug_message=bug_message,
+                error=str(exc),
+            )
 
     async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
         async def _post_transcript_comment(transcript_path: str, workspace_path: str = "") -> None:
