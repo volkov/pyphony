@@ -604,6 +604,9 @@ class LinearClient:
         created_at = _parse_iso(node.get("createdAt"))
         updated_at = _parse_iso(node.get("updatedAt"))
 
+        assignee_node = node.get("assignee")
+        assignee = assignee_node.get("displayName") if assignee_node else None
+
         return Issue(
             id=node["id"],
             identifier=node["identifier"],
@@ -615,6 +618,7 @@ class LinearClient:
             url=node.get("url"),
             labels=labels,
             blocked_by=blocked_by,
+            assignee=assignee,
             created_at=created_at,
             updated_at=updated_at,
         )
