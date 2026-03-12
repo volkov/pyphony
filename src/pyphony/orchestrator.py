@@ -205,6 +205,9 @@ class Orchestrator:
         if not issue.id or not issue.identifier or not issue.title or not issue.state:
             return False
 
+        if issue.assignee:
+            return False
+
         if self._has_workflow_issue_label(issue):
             return False
 

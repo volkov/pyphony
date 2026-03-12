@@ -24,6 +24,7 @@ class Issue(BaseModel):
     url: str | None = None
     labels: list[str] = Field(default_factory=list)
     blocked_by: list[BlockerRef] = Field(default_factory=list)
+    assignee: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

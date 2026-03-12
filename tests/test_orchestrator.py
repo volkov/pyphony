@@ -52,6 +52,7 @@ def _make_issue(
     blocked_by=None,
     created_at=None,
     labels=None,
+    assignee=None,
 ) -> Issue:
     return Issue(
         id=id,
@@ -62,6 +63,7 @@ def _make_issue(
         blocked_by=blocked_by or [],
         created_at=created_at or datetime(2024, 1, 1, tzinfo=timezone.utc),
         labels=labels or [],
+        assignee=assignee,
     )
 
 
@@ -195,6 +197,24 @@ class TestDispatchEligibility:
             state="In Progress",
             blocked_by=[BlockerRef(id="b1", state="Done")],
         )
+        assert orch._is_dispatch_eligible(issue)
+
+    def test_assigned_issue_not_eligible(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(assignee="John Doe")
+        assert not orch._is_dispatch_eligible(issue)
+
+    def test_unassigned_issue_eligible(self, tmp_path):
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue(assignee=None)
         assert orch._is_dispatch_eligible(issue)
 
 
