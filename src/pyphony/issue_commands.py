@@ -19,6 +19,9 @@ async def _get_issue(args: argparse.Namespace) -> None:
     tracker = LinearClient(config)
     try:
         result = await tracker.get_issue(identifier=args.identifier)
+        if getattr(args, "comments", False):
+            comments = await tracker.fetch_issue_comments(result["id"])
+            result["comments"] = comments
         print(json.dumps(result, indent=2))
     finally:
         await tracker.close()

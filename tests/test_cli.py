@@ -86,6 +86,16 @@ class TestParseArgs:
         assert args.identifier == "SER-27"
         assert args.workflow_file == "custom.md"
 
+    def test_get_issue_with_comments_flag(self):
+        args = parse_args(["get-issue", "SER-27", "--comments"])
+        assert args.command == "get-issue"
+        assert args.identifier == "SER-27"
+        assert args.comments is True
+
+    def test_get_issue_without_comments_flag(self):
+        args = parse_args(["get-issue", "SER-27"])
+        assert args.comments is False
+
     def test_update_issue_subcommand(self):
         args = parse_args([
             "update-issue", "SER-27",

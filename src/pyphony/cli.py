@@ -44,6 +44,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "get-issue", help="Get an existing issue from Linear by identifier"
     )
     get_parser.add_argument("identifier", help="Issue identifier (e.g. SER-27)")
+    get_parser.add_argument(
+        "--comments",
+        action="store_true",
+        default=False,
+        help="Include issue comments in the output",
+    )
     _add_common_args(get_parser)
 
     # Update issue

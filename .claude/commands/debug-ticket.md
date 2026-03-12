@@ -4,11 +4,21 @@ Analyze what happened with ticket $ARGUMENTS in the pyphony service.
 
 ## Steps
 
-### 1. Find log entries
+### 1. Fetch issue with comments
+
+Fetch the issue details and all comments from Linear using the CLI:
+
+```bash
+./pyphony get-issue $ARGUMENTS --comments
+```
+
+This gives you the full context: title, description, state, and all comments (including agent summaries, status updates, and user notes).
+
+### 2. Find log entries
 
 Search the log file at `logs/pyphony.log` for all lines containing the ticket identifier (e.g. `SER-12`). Use Grep with output_mode "content" to get full lines.
 
-### 2. Extract run information
+### 3. Extract run information
 
 From the log entries, identify each run (dispatch/agent_start/agent_finish/agent_exit cycle). For each run extract:
 - **Timestamp** and **attempt number**
@@ -24,11 +34,11 @@ From the log entries, identify each run (dispatch/agent_start/agent_finish/agent
 
 Also note retry scheduling events (`retry_scheduled`) and stall detections (`stall_detected`).
 
-### 3. Read stderr logs
+### 4. Read stderr logs
 
 For each run that has a stderr log path, read it (use Read tool). Look for errors, warnings, crashes, or unusual output.
 
-### 4. Analyze transcripts
+### 5. Analyze transcripts
 
 For each run that has a transcript path, read the JSONL file. Each line is a JSON object. Focus on:
 - **User messages** (`"type":"user"`) — the prompt sent to the agent
@@ -39,7 +49,7 @@ For each run that has a transcript path, read the JSONL file. Each line is a JSO
 
 Since transcripts can be large, read them in chunks. Start with the first 100 lines and last 100 lines to get the prompt and final result. If more context is needed, read middle sections.
 
-### 5. Check workspace state
+### 6. Check workspace state
 
 If the workspace path exists, check:
 - `ls` the workspace to see what files were created
@@ -47,7 +57,7 @@ If the workspace path exists, check:
 - `git diff` to see any uncommitted changes
 - Check if `.claude/` directory exists (session state)
 
-### 6. Produce report
+### 7. Produce report
 
 Output a structured report in markdown:
 
@@ -80,7 +90,7 @@ What should be done to fix or re-run this ticket successfully.
 
 Be thorough but concise. Focus on actionable findings.
 
-### 7. Suggest next actions
+### 8. Suggest next actions
 
 If the report identified any issues or problems, present the user with action options:
 
