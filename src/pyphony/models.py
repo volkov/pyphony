@@ -73,9 +73,7 @@ class AgentConfig(BaseModel):
 class CodexConfig(BaseModel):
     command: str = "claude"
     permission_mode: str = "bypassPermissions"
-    allowed_tools: list[str] = Field(
-        default_factory=lambda: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"]
-    )
+    allowed_tools: list[str] = Field(default_factory=list)
     disallowed_tools: list[str] = Field(default_factory=list)
     model: str | None = None
     max_turns: int | None = None
