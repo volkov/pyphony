@@ -534,14 +534,15 @@ class Orchestrator:
                     self._state.processed_bug_reports.add(comment_id)
                     continue
 
-                await self._create_bug_report_issue(issue, bug_message)
+                await self._create_bug_report_issue(issue, bug_message, comment_id)
                 self._state.processed_bug_reports.add(comment_id)
                 # Add to confirmed set so subsequent /bug-report comments
                 # with the same message in this issue are also skipped.
                 confirmed_messages.add(bug_message)
 
     async def _create_bug_report_issue(
-        self, source_issue: Issue, bug_message: str
+        self, source_issue: Issue, bug_message: str,
+        parent_comment_id: str | None = None,
     ) -> None:
         """Create a bug+research issue triggered by a ``/bug-report`` comment."""
         title = f"Bug: {bug_message[:120]}"
@@ -596,7 +597,8 @@ class Orchestrator:
             )
             try:
                 await self._tracker.comment_on_issue(
-                    source_issue.id, confirm_body
+                    source_issue.id, confirm_body,
+                    parent_comment_id=parent_comment_id,
                 )
             except Exception as exc:
                 log.warning(
