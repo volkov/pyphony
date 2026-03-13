@@ -379,3 +379,46 @@ class TestProcessBugReportCommands:
         tracker.create_issue.assert_called_once()
         assert "comment-1" in orch.state.processed_bug_reports
         assert "comment-2" in orch.state.processed_bug_reports
+
+    @pytest.mark.asyncio
+    async def test_bug_report_on_backlog_issue(self, tmp_path):
+        """Bug report commands on Backlog issues should be processed (SER-146)."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        # Issue is in Backlog — NOT in active_states
+        issue = _make_issue(
+            id="id-backlog",
+            identifier="SER-101",
+            title="Backlog task",
+            state="Backlog",
+        )
+
+        tracker.fetch_issue_comments = AsyncMock(return_value=[
+            {
+                "id": "comment-backlog-1",
+                "body": "/bug-report агент зацикливается на этом тикете",
+                "created_at": "2024-01-01T00:00:00Z",
+                "user": "Sergey",
+            }
+        ])
+        tracker.create_issue = AsyncMock(return_value={
+            "id": "new-bug-id",
+            "identifier": "SER-150",
+            "title": "Bug: агент зацикливается на этом тикете",
+            "url": "https://linear.app/team/issue/SER-150",
+        })
+        tracker.replace_issue_labels = AsyncMock(return_value=True)
+        tracker.comment_on_issue = AsyncMock(return_value="comment-mock-id")
+
+        # _process_bug_report_commands now receives issues in any state
+        await orch._process_bug_report_commands([issue])
+
+        # Verify issue was created even though the source issue is in Backlog
+        tracker.create_issue.assert_called_once()
+        call_args = tracker.create_issue.call_args
+        assert "агент зацикливается на этом тикете" in call_args.kwargs["title"]
+        assert "/debug-ticket SER-101" in call_args.kwargs["description"]
+        assert "comment-backlog-1" in orch.state.processed_bug_reports
