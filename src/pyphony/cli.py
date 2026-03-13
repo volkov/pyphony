@@ -126,6 +126,12 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default="logs/pyphony.log",
         help="Path to log file (default: logs/pyphony.log)",
     )
+    parser.add_argument(
+        "--pyphony-slug",
+        default=None,
+        help="Project slug used for creating issues (bug reports, etc.). "
+        "Overrides tracker.project_slug from WORKFLOW.md for issue creation.",
+    )
 
 
 def main() -> None:

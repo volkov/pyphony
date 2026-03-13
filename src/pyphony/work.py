@@ -110,6 +110,11 @@ async def _work(args: argparse.Namespace) -> None:
     wf = load_workflow(Path(args.workflow_file))
     config = service_config_from_workflow(wf.config, workflow_path=args.workflow_file)
 
+    # Override pyphony_slug from CLI if provided
+    pyphony_slug = getattr(args, "pyphony_slug", None)
+    if pyphony_slug:
+        config.tracker.pyphony_slug = pyphony_slug
+
     tracker = LinearClient(config)
     try:
         # ── 1. Fetch issue ──────────────────────────────────────────────

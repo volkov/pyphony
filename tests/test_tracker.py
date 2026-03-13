@@ -1071,6 +1071,169 @@ class TestUpdateIssue:
                 await client.close()
 
 
+class TestCreateIssueWithPyphonySlug:
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_create_issue_uses_pyphony_slug_when_set(self):
+        """When pyphony_slug is set, create_issue uses it instead of project_slug."""
+        route = respx.post(ENDPOINT).mock(
+            side_effect=[
+                # PROJECT_TEAMS_QUERY
+                httpx.Response(200, json={
+                    "data": {
+                        "projects": {
+                            "nodes": [{
+                                "id": "proj-pyphony",
+                                "teams": {"nodes": [{"id": "team-pyphony"}]},
+                            }]
+                        }
+                    }
+                }),
+                # WORKFLOW_STATES_QUERY
+                httpx.Response(200, json={
+                    "data": {
+                        "workflowStates": {
+                            "nodes": [
+                                {"id": "state-backlog", "name": "Backlog"},
+                                {"id": "state-todo", "name": "Todo"},
+                            ]
+                        }
+                    }
+                }),
+                # ISSUE_CREATE_MUTATION
+                httpx.Response(200, json={
+                    "data": {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {
+                                "id": "new-id",
+                                "identifier": "SER-99",
+                                "title": "Bug: test",
+                                "url": "https://linear.app/issue/SER-99",
+                            },
+                        }
+                    }
+                }),
+            ]
+        )
+
+        config = _make_config(pyphony_slug="pyphony-slug-123")
+        client = LinearClient(config)
+        try:
+            result = await client.create_issue(title="Bug: test", state="Todo")
+        finally:
+            await client.close()
+
+        assert result["identifier"] == "SER-99"
+        # Verify the first call used pyphony_slug, not project_slug
+        import json
+        first_call_body = json.loads(route.calls[0].request.content)
+        assert first_call_body["variables"]["projectSlug"] == "pyphony-slug-123"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_create_issue_explicit_slug_overrides_pyphony(self):
+        """Explicit project_slug param overrides pyphony_slug."""
+        route = respx.post(ENDPOINT).mock(
+            side_effect=[
+                httpx.Response(200, json={
+                    "data": {
+                        "projects": {
+                            "nodes": [{
+                                "id": "proj-explicit",
+                                "teams": {"nodes": [{"id": "team-1"}]},
+                            }]
+                        }
+                    }
+                }),
+                httpx.Response(200, json={
+                    "data": {
+                        "workflowStates": {
+                            "nodes": [{"id": "s1", "name": "Backlog"}]
+                        }
+                    }
+                }),
+                httpx.Response(200, json={
+                    "data": {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {
+                                "id": "id-1",
+                                "identifier": "X-1",
+                                "title": "Test",
+                                "url": "u",
+                            },
+                        }
+                    }
+                }),
+            ]
+        )
+
+        config = _make_config(pyphony_slug="pyphony-slug")
+        client = LinearClient(config)
+        try:
+            await client.create_issue(
+                title="Test", project_slug="explicit-slug"
+            )
+        finally:
+            await client.close()
+
+        import json
+        first_call_body = json.loads(route.calls[0].request.content)
+        assert first_call_body["variables"]["projectSlug"] == "explicit-slug"
+
+    @respx.mock
+    @pytest.mark.asyncio
+    async def test_create_issue_falls_back_to_project_slug(self):
+        """When pyphony_slug is not set, falls back to project_slug."""
+        route = respx.post(ENDPOINT).mock(
+            side_effect=[
+                httpx.Response(200, json={
+                    "data": {
+                        "projects": {
+                            "nodes": [{
+                                "id": "proj-default",
+                                "teams": {"nodes": [{"id": "team-1"}]},
+                            }]
+                        }
+                    }
+                }),
+                httpx.Response(200, json={
+                    "data": {
+                        "workflowStates": {
+                            "nodes": [{"id": "s1", "name": "Backlog"}]
+                        }
+                    }
+                }),
+                httpx.Response(200, json={
+                    "data": {
+                        "issueCreate": {
+                            "success": True,
+                            "issue": {
+                                "id": "id-1",
+                                "identifier": "X-1",
+                                "title": "Test",
+                                "url": "u",
+                            },
+                        }
+                    }
+                }),
+            ]
+        )
+
+        # No pyphony_slug set
+        config = _make_config()
+        client = LinearClient(config)
+        try:
+            await client.create_issue(title="Test")
+        finally:
+            await client.close()
+
+        import json
+        first_call_body = json.loads(route.calls[0].request.content)
+        assert first_call_body["variables"]["projectSlug"] == "test-project"
+
+
 class TestAttachPrToIssue:
     @respx.mock
     @pytest.mark.asyncio
