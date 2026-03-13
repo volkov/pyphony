@@ -465,3 +465,72 @@ async def test_cleanup_delete_branch(tmp_path):
         text=True,
     )
     assert "SER-64" not in branches.stdout
+
+
+# ======================================================================
+# use_main_repo tests
+# ======================================================================
+
+
+@pytest.mark.asyncio
+async def test_use_main_repo_success(tmp_path):
+    """use_main_repo returns workspace when on main with clean tree."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+    ws = await mgr.use_main_repo(repo)
+
+    assert ws.path == str(repo)
+    assert ws.workspace_key == "main"
+    assert ws.created_now is False
+
+
+@pytest.mark.asyncio
+async def test_use_main_repo_wrong_branch(tmp_path):
+    """use_main_repo raises when not on main branch."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    # Switch to a different branch
+    subprocess.run(
+        ["git", "checkout", "-b", "feature"],
+        cwd=str(repo),
+        check=True,
+        capture_output=True,
+    )
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+
+    with pytest.raises(HookError, match="expected 'main'"):
+        await mgr.use_main_repo(repo)
+
+
+@pytest.mark.asyncio
+async def test_use_main_repo_dirty_tree(tmp_path):
+    """use_main_repo raises when working copy has changes."""
+    repo = _init_git_repo(tmp_path / "repo")
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    # Create an uncommitted file
+    (repo / "dirty.txt").write_text("uncommitted")
+
+    mgr = WorkspaceManager(_config_with_repo(workspaces, repo))
+
+    with pytest.raises(HookError, match="not clean"):
+        await mgr.use_main_repo(repo)
+
+
+@pytest.mark.asyncio
+async def test_use_main_repo_nonexistent(tmp_path):
+    """use_main_repo raises when path does not exist."""
+    workspaces = tmp_path / "workspaces"
+    workspaces.mkdir()
+
+    mgr = WorkspaceManager(_config(workspaces))
+
+    with pytest.raises(HookError, match="does not exist"):
+        await mgr.use_main_repo(tmp_path / "nonexistent")

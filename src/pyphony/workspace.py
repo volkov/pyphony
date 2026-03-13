@@ -168,6 +168,40 @@ class WorkspaceManager:
         )
 
     # ------------------------------------------------------------------
+    # main-repo mode (work directly in the repo checkout)
+    # ------------------------------------------------------------------
+
+    async def use_main_repo(self, repo_path: Path) -> Workspace:
+        """Use the main repo directly as the workspace.
+
+        Validates that *repo_path* is on the ``main`` branch with a clean
+        working tree.  Raises :class:`HookError` otherwise.
+        """
+        if not repo_path.is_dir():
+            raise HookError(f"Repo path does not exist: {repo_path}")
+
+        # Check current branch
+        branch = await self._run_git("rev-parse", "--abbrev-ref", "HEAD", cwd=repo_path)
+        if branch != "main":
+            raise HookError(
+                f"Cannot use --main: repo is on branch '{branch}', expected 'main'"
+            )
+
+        # Check for uncommitted changes (staged + unstaged + untracked)
+        status = await self._run_git("status", "--porcelain", cwd=repo_path)
+        if status:
+            raise HookError(
+                "Cannot use --main: working copy is not clean. "
+                "Commit or stash your changes first."
+            )
+
+        return Workspace(
+            path=str(repo_path),
+            workspace_key="main",
+            created_now=False,
+        )
+
+    # ------------------------------------------------------------------
     # hooks
     # ------------------------------------------------------------------
 
