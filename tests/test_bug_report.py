@@ -268,3 +268,114 @@ class TestProcessBugReportCommands:
         assert "SER-77" in desc
         assert "Feature X" in desc
         assert "tests fail after merge" in desc
+
+    @pytest.mark.asyncio
+    async def test_skips_bug_report_when_confirmation_comment_exists(self, tmp_path):
+        """Do not create a duplicate issue if a confirmation comment already exists."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+
+        tracker.fetch_issue_comments = AsyncMock(return_value=[
+            {
+                "id": "comment-1",
+                "body": "/bug-report агент зацикливается",
+                "created_at": "2024-01-01T00:00:00Z",
+                "user": "Test User",
+            },
+            {
+                "id": "comment-2",
+                "body": "🐛 Создан баг-репорт [SER-99](https://linear.app/team/issue/SER-99): агент зацикливается",
+                "created_at": "2024-01-01T00:01:00Z",
+                "user": "Bot",
+            },
+        ])
+        tracker.create_issue = AsyncMock()
+
+        await orch._process_bug_report_commands([issue])
+
+        # Should NOT create a new issue — confirmation already exists
+        tracker.create_issue.assert_not_called()
+        # Comment is still marked as processed
+        assert "comment-1" in orch.state.processed_bug_reports
+
+    @pytest.mark.asyncio
+    async def test_creates_issue_when_confirmation_for_different_message(self, tmp_path):
+        """Create issue when confirmation exists but for a different bug message."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+
+        tracker.fetch_issue_comments = AsyncMock(return_value=[
+            {
+                "id": "comment-1",
+                "body": "/bug-report новая проблема",
+                "created_at": "2024-01-01T00:00:00Z",
+                "user": "Test User",
+            },
+            {
+                "id": "comment-2",
+                "body": "🐛 Создан баг-репорт [SER-99](https://linear.app/team/issue/SER-99): старая проблема",
+                "created_at": "2024-01-01T00:01:00Z",
+                "user": "Bot",
+            },
+        ])
+        tracker.create_issue = AsyncMock(return_value={
+            "id": "new-id",
+            "identifier": "SER-100",
+            "title": "Bug: новая проблема",
+            "url": "https://linear.app/team/issue/SER-100",
+        })
+        tracker.replace_issue_labels = AsyncMock(return_value=True)
+        tracker.comment_on_issue = AsyncMock(return_value="comment-mock-id")
+
+        await orch._process_bug_report_commands([issue])
+
+        # Should create issue for the new, unconfirmed message
+        tracker.create_issue.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_skips_duplicate_bug_reports_in_same_batch(self, tmp_path):
+        """Two /bug-report comments with the same message should create only one issue."""
+        config = _make_config(tmp_path)
+        tracker = LinearClient(config)
+        ws_mgr = WorkspaceManager(config)
+        orch = Orchestrator(config, tracker, ws_mgr)
+
+        issue = _make_issue()
+
+        tracker.fetch_issue_comments = AsyncMock(return_value=[
+            {
+                "id": "comment-1",
+                "body": "/bug-report одна и та же проблема",
+                "created_at": "2024-01-01T00:00:00Z",
+                "user": "User A",
+            },
+            {
+                "id": "comment-2",
+                "body": "/bug-report одна и та же проблема",
+                "created_at": "2024-01-01T00:01:00Z",
+                "user": "User B",
+            },
+        ])
+        tracker.create_issue = AsyncMock(return_value={
+            "id": "new-id",
+            "identifier": "SER-100",
+            "title": "Bug: одна и та же проблема",
+            "url": "https://linear.app/team/issue/SER-100",
+        })
+        tracker.replace_issue_labels = AsyncMock(return_value=True)
+        tracker.comment_on_issue = AsyncMock(return_value="comment-mock-id")
+
+        await orch._process_bug_report_commands([issue])
+
+        # Should create only ONE issue, not two
+        tracker.create_issue.assert_called_once()
+        assert "comment-1" in orch.state.processed_bug_reports
+        assert "comment-2" in orch.state.processed_bug_reports
