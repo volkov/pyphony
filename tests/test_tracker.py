@@ -673,6 +673,7 @@ class TestGetIssue:
                                     "title": "Test issue",
                                     "description": "A description",
                                     "state": {"name": "Todo"},
+                                    "project": {"name": "My Project"},
                                     "url": "https://linear.app/issue/SER-27",
                                 }
                             ]
@@ -693,6 +694,7 @@ class TestGetIssue:
         assert result["title"] == "Test issue"
         assert result["description"] == "A description"
         assert result["state"] == "Todo"
+        assert result["project"] == "My Project"
         assert result["url"] == "https://linear.app/issue/SER-27"
 
     @respx.mock

@@ -206,6 +206,7 @@ query IssueByIdentifier($filter: IssueFilter!, $first: Int!) {
       title
       description
       state { name }
+      project { name }
       url
     }
   }
