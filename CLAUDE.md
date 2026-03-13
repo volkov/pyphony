@@ -67,6 +67,25 @@ When running Python commands inside a workspace, **always use `uv run`** (e.g. `
 
 If you need to install dependencies before running tests, run `uv sync` first.
 
+## Test Project (Linear)
+
+Для тестирования взаимодействия с Linear API есть специальный тестовый проект **Pyphony Test Sandbox** (slug: `2143f8bc976f`).
+
+Используй его когда нужно проверить поведение тикетов через API — создание, обновление статусов, комментарии, лейблы и т.д. Тикеты в этом проекте одноразовые, можно свободно создавать и менять.
+
+```bash
+# Создать тикет в тестовом проекте:
+./pyphony create-issue --title "Test ticket" --project-slug 2143f8bc976f
+
+# Получить тикет:
+./pyphony get-issue SER-<number>
+
+# Обновить тикет:
+./pyphony update-issue SER-<number> --state "In Progress"
+```
+
+**Важно:** не используй основной проект Pyphony (slug: `1fc8e25cc22b`) для тестов — только `2143f8bc976f`.
+
 ## Subagent Instructions
 
 Before starting work, read `TODO.md` for the current implementation status.
