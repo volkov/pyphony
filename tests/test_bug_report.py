@@ -131,11 +131,12 @@ class TestProcessBugReportCommands:
             add_labels=["bug", "research"],
         )
 
-        # Verify confirmation comment was posted
+        # Verify confirmation comment was posted as a reply to the /bug-report comment
         tracker.comment_on_issue.assert_called_once()
         confirm_call = tracker.comment_on_issue.call_args
         assert confirm_call.args[0] == issue.id
         assert "SER-99" in confirm_call.args[1]
+        assert confirm_call.kwargs.get("parent_comment_id") == "comment-1"
 
     @pytest.mark.asyncio
     async def test_skips_already_processed_comments(self, tmp_path):
