@@ -31,6 +31,7 @@ from pathlib import Path
 
 from .automerge import extract_pr_urls_from_transcript, try_automerge_pr
 from .config import service_config_from_workflow
+from .orchestrator import _build_transcript_url
 from .prompt import render_prompt
 from .tracker import LinearClient
 from .workflow import load_workflow
@@ -205,7 +206,13 @@ async def _work(args: argparse.Namespace) -> None:
 
         # ── 11. Post session summary as comment ─────────────────────────
         if last_message:
-            comment_body = f"### Interactive work session\n\n{last_message}"
+            transcript_url = _build_transcript_url(
+                config.server.explorer_base_url, transcript_path or ""
+            )
+            transcript_line = (
+                f"[Transcript]({transcript_url})\n\n" if transcript_url else ""
+            )
+            comment_body = f"### Interactive work session\n\n{transcript_line}{last_message}"
             print(f"\n💬 Posting session summary to {issue.identifier}...")
             posted = await tracker.comment_on_issue(issue.id, comment_body)
             if posted:
