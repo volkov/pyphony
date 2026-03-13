@@ -59,6 +59,7 @@ def render_prompt(
     issue: Issue,
     attempt: int | None = None,
     comments: list[dict] | None = None,
+    thread_replies: list[dict] | None = None,
 ) -> str:
     body = template.strip()
     if not body:
@@ -93,6 +94,17 @@ def render_prompt(
             if i == len(comments) - 1 and len(comments) > 1:
                 rendered += "\n### Latest comment\n"
             rendered += f"\n**{user}** ({created_at}):\n{comment_body}\n"
+
+    if thread_replies:
+        rendered += "\n\n---\n## Thread replies (follow-up messages):\n"
+        rendered += "\n> These are follow-up messages from the thread. Address the latest reply.\n"
+        for i, reply in enumerate(thread_replies):
+            user = reply.get("user", "Unknown")
+            created_at = reply.get("created_at", "")
+            reply_body = reply.get("body", "")
+            if i == len(thread_replies) - 1 and len(thread_replies) > 1:
+                rendered += "\n### Latest reply\n"
+            rendered += f"\n**{user}** ({created_at}):\n{reply_body}\n"
 
     # Append special instructions based on labels
     issue_labels_normalized = [normalize_label(label) for label in issue.labels]

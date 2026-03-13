@@ -137,7 +137,7 @@ class TestDrainCoordinator:
         orch_a.state.running[issue_a.id] = _running_entry(issue_a)
         orch_a.state.claimed.add(issue_a.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch_a._on_worker_exit(issue_a.id, normal=True, error=None, result="[DONE]")
@@ -200,7 +200,7 @@ class TestDrainCoordinator:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -445,7 +445,7 @@ class TestRollingReplacement:
         assert not orch.drain_complete_event.is_set()
 
         # Simulate agent completion
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="done")
 

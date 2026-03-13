@@ -21,6 +21,7 @@ from .models import (
     RunAttempt,
     RunningEntry,
     ServiceConfig,
+    ThreadSession,
 )
 from .normalization import normalize_label, normalize_state, sort_issues_for_dispatch
 from .prompt import render_prompt
@@ -177,6 +178,9 @@ class Orchestrator:
 
         # Process /bug-report commands in comments before dispatching
         await self._process_bug_report_commands(issues)
+
+        # Process /reply commands in thread comments (resume agent sessions)
+        await self._process_thread_replies(issues)
 
         sorted_issues = sort_issues_for_dispatch(issues)
         dispatched = 0
@@ -435,6 +439,10 @@ class Orchestrator:
         r"^/bug-report\s+(.+)", re.MULTILINE
     )
 
+    _REPLY_RE = re.compile(
+        r"^/reply\s+(.+)", re.MULTILINE | re.DOTALL
+    )
+
     async def _process_bug_report_commands(self, issues: list[Issue]) -> None:
         """Scan comments on candidate issues for ``/bug-report`` commands.
 
@@ -545,9 +553,157 @@ class Orchestrator:
                 error=str(exc),
             )
 
-    async def _run_worker(self, issue: Issue, entry: RunningEntry) -> None:
+    # ------------------------------------------------------------------
+    # /reply thread comment processing — resume agent sessions
+    # ------------------------------------------------------------------
+
+    async def _process_thread_replies(self, issues: list[Issue]) -> None:
+        """Scan thread replies for ``/reply`` commands and resume agent sessions.
+
+        For each saved thread session, check if new replies appeared in the
+        thread that start with ``/reply``.  When found, resume the agent
+        session with the reply text as additional user input.
+        """
+        if not self._state.thread_sessions:
+            return
+
+        # Build a quick lookup: issue_id → issue
+        issue_by_id: dict[str, Issue] = {i.id: i for i in issues}
+
+        # Iterate over a copy since we may modify thread_sessions
+        for thread_root, ts in list(self._state.thread_sessions.items()):
+            # Skip if this issue already has a running agent
+            if ts.issue_id in self._state.running:
+                continue
+            if ts.issue_id in self._state.claimed:
+                continue
+
+            # We need the issue object — look it up or fetch it
+            issue = issue_by_id.get(ts.issue_id)
+            if not issue:
+                # Issue might no longer be in candidate states — try to fetch
+                try:
+                    issue = await self._tracker.fetch_issue_by_identifier(
+                        ts.issue_identifier
+                    )
+                except Exception:
+                    continue
+
+            try:
+                comments = await self._tracker.fetch_issue_comments(ts.issue_id)
+            except Exception as exc:
+                log.warning(
+                    "reply_fetch_comments_failed",
+                    issue_identifier=ts.issue_identifier,
+                    error=str(exc),
+                )
+                continue
+
+            # Find the thread root comment and check its children
+            root_comment = None
+            for comment in comments:
+                if comment.get("id") == thread_root:
+                    root_comment = comment
+                    break
+
+            if not root_comment:
+                continue
+
+            children = root_comment.get("children", [])
+            # Process replies in chronological order
+            for child in children:
+                child_id = child.get("id", "")
+                if not child_id:
+                    continue
+                if child_id in ts.processed_reply_ids:
+                    continue
+
+                body = child.get("body", "")
+                match = self._REPLY_RE.search(body)
+                if not match:
+                    # Mark as processed even without match to avoid re-scanning
+                    ts.processed_reply_ids.add(child_id)
+                    continue
+
+                reply_text = match.group(1).strip()
+                ts.processed_reply_ids.add(child_id)
+
+                log.info(
+                    "thread_reply_detected",
+                    issue_identifier=ts.issue_identifier,
+                    thread_root=thread_root,
+                    reply_comment_id=child_id,
+                    reply_len=len(reply_text),
+                )
+
+                # Resume agent session with the reply text
+                await self._dispatch_thread_resume(
+                    issue=issue,
+                    thread_session=ts,
+                    reply_text=reply_text,
+                )
+                # Only process one reply at a time per thread
+                break
+
+    async def _dispatch_thread_resume(
+        self,
+        issue: Issue,
+        thread_session: ThreadSession,
+        reply_text: str,
+    ) -> None:
+        """Resume an agent session in response to a /reply thread comment."""
+        self._state.claimed.add(issue.id)
+
+        attempt = RunAttempt(
+            issue_id=issue.id,
+            issue_identifier=issue.identifier,
+            attempt=0,
+            started_at=datetime.now(timezone.utc),
+            status="running",
+        )
+
+        entry = RunningEntry(
+            issue=issue,
+            attempt=attempt,
+            thread_root_comment_id=thread_session.thread_root_comment_id,
+        )
+
+        self._state.running[issue.id] = entry
+
+        log.info(
+            "dispatch_thread_resume",
+            issue_identifier=issue.identifier,
+            session_id=thread_session.session_id,
+            thread_root=thread_session.thread_root_comment_id,
+        )
+
+        task = asyncio.create_task(
+            self._run_worker(
+                issue, entry,
+                resume_session_id=thread_session.session_id,
+                resume_workspace_path=thread_session.workspace_path,
+                reply_prompt=reply_text,
+            )
+        )
+        entry.worker_task = task
+
+    async def _run_worker(
+        self,
+        issue: Issue,
+        entry: RunningEntry,
+        *,
+        resume_session_id: str | None = None,
+        resume_workspace_path: str | None = None,
+        reply_prompt: str | None = None,
+    ) -> None:
         async def _post_transcript_comment(transcript_path: str, workspace_path: str = "") -> None:
-            """Post a comment with the transcript link as soon as it's available."""
+            """Post a comment with the transcript link as soon as it's available.
+
+            The first transcript comment becomes the thread root. Its ID is
+            stored in ``entry.thread_root_comment_id`` so that all subsequent
+            comments for this agent run are posted as replies in the same
+            thread.
+            """
             transcript_url = _build_transcript_url(
                 self._config.server.explorer_base_url, transcript_path
             )
@@ -556,11 +712,20 @@ class Orchestrator:
                     transcript_url, transcript_path, workspace_path,
                 )
                 try:
-                    await self._tracker.comment_on_issue(issue.id, body)
+                    # For resumed sessions, post as reply in existing thread
+                    parent_id = entry.thread_root_comment_id
+                    comment_id = await self._tracker.comment_on_issue(
+                        issue.id, body, parent_comment_id=parent_id,
+                    )
+                    # If this is the first comment (no parent), it becomes the
+                    # thread root for all subsequent messages.
+                    if comment_id and not entry.thread_root_comment_id:
+                        entry.thread_root_comment_id = comment_id
                     log.info(
                         "transcript_comment_posted",
                         issue_identifier=issue.identifier,
                         transcript_url=transcript_url,
+                        thread_root=entry.thread_root_comment_id,
                     )
                 except Exception as exc:
                     log.warning(
@@ -573,10 +738,25 @@ class Orchestrator:
             result = await self._run_agent_fn(
                 issue, entry.attempt.attempt,
                 on_transcript=_post_transcript_comment,
+                resume_session_id=resume_session_id,
+                resume_workspace_path=resume_workspace_path,
+                reply_prompt=reply_prompt,
             )
             # Propagate plan_text from agent's RunAttempt to orchestrator's
             if hasattr(result, "plan_text") and result.plan_text:
                 entry.attempt.plan_text = result.plan_text
+
+            # Propagate workspace_path from agent result
+            if hasattr(result, "workspace_path") and result.workspace_path:
+                entry.attempt.workspace_path = result.workspace_path
+
+            # Store session_id for potential thread resume later
+            if hasattr(result, "session_id") and result.session_id:
+                entry.attempt.session_id = result.session_id
+                # Also store in entry.session for convenience
+                if not entry.session.session_id:
+                    entry.session.session_id = result.session_id
+
             if hasattr(result, "status") and result.status == "failed":
                 log.error(
                     "worker_failed",
@@ -650,17 +830,43 @@ class Orchestrator:
         else:
             comment_body = "Agent completed without producing a result."
 
+        # Post as reply in thread if we have a thread root
+        parent_comment_id = entry.thread_root_comment_id
         try:
-            await self._tracker.comment_on_issue(issue_id, comment_body)
+            comment_id = await self._tracker.comment_on_issue(
+                issue_id, comment_body,
+                parent_comment_id=parent_comment_id,
+            )
             log.info(
                 "comment_posted",
                 issue_identifier=entry.issue.identifier,
+                thread_root=parent_comment_id,
             )
         except Exception as exc:
             log.warning(
                 "comment_post_failed",
                 issue_identifier=entry.issue.identifier,
                 error=str(exc),
+            )
+
+        # Save thread session for potential /reply resume
+        session_id = getattr(entry.attempt, "session_id", None) or entry.session.session_id
+        thread_root = entry.thread_root_comment_id
+        workspace_path = entry.attempt.workspace_path
+
+        if session_id and thread_root and workspace_path:
+            self._state.thread_sessions[thread_root] = ThreadSession(
+                issue_id=issue_id,
+                issue_identifier=entry.issue.identifier,
+                session_id=session_id,
+                workspace_path=workspace_path,
+                thread_root_comment_id=thread_root,
+            )
+            log.info(
+                "thread_session_saved",
+                issue_identifier=entry.issue.identifier,
+                session_id=session_id,
+                thread_root=thread_root,
             )
 
         # Transition issue based on completion and review requirements

@@ -193,6 +193,9 @@ class AgentRunner:
         attempt: int | None = None,
         on_event: object | None = None,
         on_transcript: "Callable[[str], Awaitable[None]] | None" = None,
+        resume_session_id: str | None = None,
+        resume_workspace_path: str | None = None,
+        reply_prompt: str | None = None,
     ) -> RunAttempt:
         """Run an agent session for one issue."""
         run_attempt = RunAttempt(
@@ -213,15 +216,25 @@ class AgentRunner:
 
         try:
             # 1. Create/reuse workspace
-            workspace = await self._workspace_mgr.create_or_reuse(issue.identifier)
+            if resume_session_id and resume_workspace_path:
+                # Reuse the existing workspace for resume
+                from .models import Workspace
+                workspace = Workspace(
+                    path=resume_workspace_path,
+                    workspace_key=issue.identifier,
+                    created_now=False,
+                )
+            else:
+                workspace = await self._workspace_mgr.create_or_reuse(issue.identifier)
             run_attempt.workspace_path = workspace.path
 
-            # 2. Run before_run hook
-            await self._workspace_mgr.run_before_run(workspace.path)
+            # 2. Run before_run hook (skip for resume — workspace already set up)
+            if not resume_session_id:
+                await self._workspace_mgr.run_before_run(workspace.path)
 
-            # 3. Fetch previous comments for context
+            # 3. Fetch previous comments for context (skip for resume)
             comments = None
-            if self._tracker:
+            if self._tracker and not resume_session_id:
                 try:
                     comments = await self._tracker.fetch_issue_comments(issue.id)
                 except Exception as exc:
@@ -231,10 +244,15 @@ class AgentRunner:
                         error=str(exc),
                     )
 
-            # 4. Build prompt from template
-            prompt = render_prompt(
-                self._prompt_template, issue, attempt=attempt, comments=comments
-            )
+            # 4. Build prompt
+            if resume_session_id and reply_prompt:
+                # For resume, the prompt is the reply text — the agent already
+                # has full context from the previous session.
+                prompt = reply_prompt
+            else:
+                prompt = render_prompt(
+                    self._prompt_template, issue, attempt=attempt, comments=comments
+                )
 
             # 5. Build SDK options (restrict tools for plan-only issues)
             codex = self._config.codex
@@ -283,6 +301,7 @@ class AgentRunner:
                     system_prompt=codex.system_prompt,
                     cli_path=codex.command if codex.command != "claude" else None,
                     stderr=lambda line: stderr_file.write(line + "\n"),
+                    resume=resume_session_id,
                 )
 
                 log.info(
@@ -297,6 +316,7 @@ class AgentRunner:
                     system_prompt_len=len(codex.system_prompt) if codex.system_prompt else 0,
                     cli_path=options.cli_path,
                     prompt_len=len(prompt),
+                    resume=resume_session_id,
                 )
 
                 # 6. Run query
@@ -318,6 +338,7 @@ class AgentRunner:
                             if sid:
                                 tp = _transcript_path(workspace.path, sid)
                                 run_attempt.transcript_path = tp
+                                run_attempt.session_id = sid
                                 transcript_notified = True
                                 try:
                                     await on_transcript(tp, workspace.path)
@@ -328,6 +349,7 @@ class AgentRunner:
                                     )
 
                         if isinstance(message, ResultMessage):
+                            run_attempt.session_id = message.session_id
                             if not run_attempt.transcript_path:
                                 run_attempt.transcript_path = _transcript_path(
                                     workspace.path, message.session_id
