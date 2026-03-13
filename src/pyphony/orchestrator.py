@@ -367,8 +367,11 @@ class Orchestrator:
             )
 
             # 4. Post comment with instructions
+            pyphony_url = f"pyphony://{issue.identifier}/work?interactive=true"
             comment_body = (
-                "🖥️ Interactive task — запусти Claude Code вручную:\n"
+                "🖥️ Interactive task — открой в один клик:\n\n"
+                f"👉 [{pyphony_url}]({pyphony_url})\n\n"
+                "Или запусти вручную:\n"
                 "```\n"
                 f"cd {workspace_path}\n"
                 "claude\n"
