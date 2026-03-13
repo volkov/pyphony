@@ -247,12 +247,22 @@ async def _run_service(args: argparse.Namespace) -> None:
 
     # Build contexts for each workflow
     pyphony_slug = getattr(args, "pyphony_slug", None)
+    # If no explicit --pyphony-slug, use the first workflow's project_slug
+    # (first workflow is always pyphony / WORKFLOW.md) so that bug reports
+    # created from any workflow land in the pyphony project.
+    if not pyphony_slug and workflow_paths:
+        first_wf = load_workflow(workflow_paths[0])
+        first_cfg = service_config_from_workflow(
+            first_wf.config, workflow_path=workflow_paths[0],
+        )
+        pyphony_slug = first_cfg.tracker.project_slug
+
     contexts: list[_WorkflowContext] = []
     for workflow_path in workflow_paths:
         wf = load_workflow(workflow_path)
         config = service_config_from_workflow(wf.config, workflow_path=workflow_path)
 
-        # Override pyphony_slug from CLI if provided
+        # Ensure bug reports always go to the pyphony project
         if pyphony_slug:
             config.tracker.pyphony_slug = pyphony_slug
 
