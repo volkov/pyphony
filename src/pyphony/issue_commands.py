@@ -7,6 +7,8 @@ import asyncio
 import json
 from pathlib import Path
 
+import yaml
+
 from .config import service_config_from_workflow
 from .tracker import LinearClient
 from .workflow import load_workflow
@@ -19,7 +21,10 @@ async def _get_issue(args: argparse.Namespace) -> None:
     tracker = LinearClient(config)
     try:
         result = await tracker.get_issue(identifier=args.identifier)
-        print(json.dumps(result, indent=2))
+        comments = await tracker.fetch_issue_comments(result["id"])
+        if comments:
+            result["comments"] = comments
+        print(yaml.dump(result, allow_unicode=True, default_flow_style=False, sort_keys=False))
     finally:
         await tracker.close()
 
