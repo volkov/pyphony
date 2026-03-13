@@ -45,7 +45,7 @@ query CandidateIssues($projectSlug: String!, $stateNames: [String!]!, $first: In
 """
 
 RECENTLY_UPDATED_ISSUES_QUERY = """
-query RecentlyUpdatedIssues($projectSlug: String!, $updatedAfter: DateTime!, $first: Int!, $after: String) {
+query RecentlyUpdatedIssues($projectSlug: String!, $updatedAfter: DateTimeOrDuration!, $first: Int!, $after: String) {
   issues(
     filter: {
       project: { slugId: { eq: $projectSlug } }
