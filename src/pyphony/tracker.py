@@ -405,12 +405,15 @@ class LinearClient:
             raise LinearUnknownPayload(f"Issue {identifier} not found")
 
         node = nodes[0]
+        project = node.get("project")
+        project_name = project.get("name") if project else None
         return {
             "id": node.get("id", ""),
             "identifier": node.get("identifier", ""),
             "title": node.get("title", ""),
             "description": node.get("description"),
             "state": (node.get("state") or {}).get("name", ""),
+            "project": project_name,
             "url": node.get("url", ""),
         }
 
