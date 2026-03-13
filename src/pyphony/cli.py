@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view", "work"}
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view", "work", "open-url", "install-url-scheme"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -76,6 +76,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Requires clean working copy on the main branch.",
     )
     _add_common_args(work_parser)
+
+    # open-url — handle pyphony:// URL scheme
+    open_url_parser = subparsers.add_parser(
+        "open-url", help="Handle a pyphony:// URL (opens iTerm2 tab with work session)"
+    )
+    open_url_parser.add_argument("url", help="pyphony:// URL to handle")
+
+    # install-url-scheme — register pyphony:// URL scheme on macOS
+    subparsers.add_parser(
+        "install-url-scheme",
+        help="Install macOS app bundle to handle pyphony:// URLs",
+    )
 
     # Backward compat: if first arg is not a known subcommand, insert "run"
     # so that e.g. `pyphony my_workflow.md` or `pyphony --port 8080` works
@@ -158,6 +170,12 @@ def main() -> None:
     elif args.command == "work":
         from .work import work
         work(args)
+    elif args.command == "open-url":
+        from .url_handler import handle_url
+        handle_url(args.url)
+    elif args.command == "install-url-scheme":
+        from .url_handler import install_url_scheme
+        install_url_scheme()
     else:
         from .service import run_service
         run_service(args)
