@@ -44,6 +44,48 @@ query CandidateIssues($projectSlug: String!, $stateNames: [String!]!, $first: In
 }
 """
 
+RECENTLY_UPDATED_ISSUES_QUERY = """
+query RecentlyUpdatedIssues($projectSlug: String!, $updatedAfter: DateTime!, $first: Int!, $after: String) {
+  issues(
+    filter: {
+      project: { slugId: { eq: $projectSlug } }
+      updatedAt: { gte: $updatedAfter }
+    }
+    first: $first
+    after: $after
+  ) {
+    nodes {
+      id
+      identifier
+      title
+      description
+      priority
+      state { name }
+      branchName
+      url
+      labels { nodes { name } }
+      assignee { id displayName }
+      inverseRelations(first: 100) {
+        nodes {
+          type
+          issue {
+            id
+            identifier
+            state { name }
+          }
+        }
+      }
+      createdAt
+      updatedAt
+    }
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+  }
+}
+"""
+
 ISSUE_STATES_BY_IDS_QUERY = """
 query IssueStatesByIds($ids: [ID!]!, $first: Int!, $after: String) {
   issues(

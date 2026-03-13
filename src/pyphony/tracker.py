@@ -32,6 +32,7 @@ from .tracker_queries import (
     ISSUE_UPDATE_MUTATION,
     ISSUE_UPDATE_STATE_MUTATION,
     ISSUES_BY_STATES_QUERY,
+    RECENTLY_UPDATED_ISSUES_QUERY,
     PROJECT_TEAMS_QUERY,
     TEAM_LABELS_QUERY,
     WORKFLOW_STATES_QUERY,
@@ -67,6 +68,23 @@ class LinearClient:
             "first": _PAGE_SIZE,
         }
         return await self._paginate(CANDIDATE_ISSUES_QUERY, variables)
+
+    async def fetch_recently_updated_issues(
+        self, updated_after: datetime
+    ) -> list[Issue]:
+        """Paginate through all project issues updated after *updated_after*.
+
+        Unlike :meth:`fetch_candidate_issues` this does **not** filter by
+        workflow state, so it returns issues in *any* state (Backlog, Done,
+        etc.) as long as they were updated recently.  This is used to scan
+        ``/bug-report`` commands on issues that are outside the active states.
+        """
+        variables: dict = {
+            "projectSlug": self._project_slug,
+            "updatedAfter": updated_after.isoformat(),
+            "first": _PAGE_SIZE,
+        }
+        return await self._paginate(RECENTLY_UPDATED_ISSUES_QUERY, variables)
 
     async def fetch_issue_states_by_ids(
         self, ids: list[str]

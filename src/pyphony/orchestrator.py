@@ -4,7 +4,7 @@ import asyncio
 import os
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import structlog
 
@@ -176,8 +176,26 @@ class Orchestrator:
             log.error("candidate_fetch_failed", error=str(exc))
             return
 
+        # Scan /bug-report commands across ALL project issues (not just
+        # active-state candidates) so that bug-reports left on Backlog or
+        # Done tickets are not silently ignored.  We limit the query to
+        # issues updated in the last hour to keep the request lightweight.
+        try:
+            since = datetime.now(timezone.utc) - timedelta(hours=1)
+            all_recent_issues = await self._tracker.fetch_recently_updated_issues(since)
+        except Exception as exc:
+            log.warning("recent_issues_fetch_failed", error=str(exc))
+            # Fallback: scan only candidate issues (original behaviour)
+            all_recent_issues = issues
+
+        # Merge candidates into the recent set so we never lose them.
+        seen_ids = {i.id for i in all_recent_issues}
+        for issue in issues:
+            if issue.id not in seen_ids:
+                all_recent_issues.append(issue)
+
         # Process /bug-report commands in comments before dispatching
-        await self._process_bug_report_commands(issues)
+        await self._process_bug_report_commands(all_recent_issues)
 
         # Process /reply commands in thread comments (resume agent sessions)
         await self._process_thread_replies(issues)
