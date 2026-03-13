@@ -94,22 +94,59 @@ def _build_command(parsed: dict[str, str]) -> str:
     return f"{pyphony} work {identifier} --main"
 
 
+def _is_app_installed(app_name: str) -> bool:
+    """Check if a macOS application is installed."""
+    try:
+        result = subprocess.run(
+            ["mdfind", f"kMDItemCFBundleIdentifier == 'com.googlecode.iterm2'"
+             if app_name == "iTerm2" else
+             f"kMDItemKind == 'Application' && kMDItemDisplayName == '{app_name}'"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return bool(result.stdout.strip())
+    except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
+def _escape_for_applescript(s: str) -> str:
+    """Escape a string for safe embedding in AppleScript double-quoted strings."""
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def open_in_iterm(command: str, title: str | None = None) -> bool:
     """Open a new iTerm2 tab and run *command*.
 
+    Creates a new window if iTerm2 has no open windows, otherwise creates
+    a new tab in the current window.
+
     Returns True if osascript succeeded.
     """
-    tab_title = title or "pyphony"
+    if not _is_app_installed("iTerm2"):
+        return False
+
+    tab_title = _escape_for_applescript(title or "pyphony")
+    safe_command = _escape_for_applescript(command)
+    # Use "create window" as fallback when no window exists.
     script = f'''
 tell application "iTerm2"
     activate
-    tell current window
-        create tab with default profile
-        tell current session
+    if (count of windows) = 0 then
+        create window with default profile
+        tell current session of current window
             set name to "{tab_title}"
-            write text "{command}"
+            write text "{safe_command}"
         end tell
-    end tell
+    else
+        tell current window
+            create tab with default profile
+            tell current session
+                set name to "{tab_title}"
+                write text "{safe_command}"
+            end tell
+        end tell
+    end if
 end tell
 '''
     try:
@@ -125,10 +162,11 @@ end tell
 
 def open_in_terminal_app(command: str) -> bool:
     """Fallback: open a new Terminal.app window with *command*."""
+    safe_command = _escape_for_applescript(command)
     script = f'''
 tell application "Terminal"
     activate
-    do script "{command}"
+    do script "{safe_command}"
 end tell
 '''
     try:
@@ -156,13 +194,16 @@ def handle_url(url: str) -> None:
     print(f"🚀 Opening: {command}")
 
     # Try iTerm2 first, then Terminal.app
-    if not open_in_iterm(command, title=title):
+    if open_in_iterm(command, title=title):
+        print("✅ iTerm2 tab opened!")
+    else:
         print("   iTerm2 not available, trying Terminal.app...")
-        if not open_in_terminal_app(command):
+        if open_in_terminal_app(command):
+            print("✅ Terminal.app window opened!")
+        else:
             print("❌ Could not open terminal", file=sys.stderr)
+            print(f"   Run manually: {command}", file=sys.stderr)
             sys.exit(1)
-
-    print("✅ Terminal tab opened!")
 
 
 # ---------------------------------------------------------------------------
