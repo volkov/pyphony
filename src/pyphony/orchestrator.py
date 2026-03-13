@@ -446,6 +446,8 @@ class Orchestrator:
         r"^/reply\s+(.+)", re.MULTILINE | re.DOTALL
     )
 
+    _BUG_CONFIRM_PREFIX = "🐛 Создан баг-репорт"
+
     async def _process_bug_report_commands(self, issues: list[Issue]) -> None:
         """Scan comments on candidate issues for ``/bug-report`` commands.
 
@@ -453,6 +455,10 @@ class Orchestrator:
         in the same project with labels ``bug`` and ``research``, and a
         description that instructs the agent to run ``/debug-ticket`` against
         the source ticket.
+
+        To prevent duplicate issue creation across orchestrator restarts,
+        the method checks existing comments for confirmation markers
+        (``🐛 Создан баг-репорт ... <message>``) before creating a new issue.
         """
         for issue in issues:
             try:
@@ -464,6 +470,19 @@ class Orchestrator:
                     error=str(exc),
                 )
                 continue
+
+            # Collect bug messages that already have confirmation comments
+            # to avoid creating duplicate issues after orchestrator restarts.
+            confirmed_messages: set[str] = set()
+            for comment in comments:
+                body = comment.get("body", "")
+                if body.startswith(self._BUG_CONFIRM_PREFIX):
+                    # Confirmation format:
+                    #   "🐛 Создан баг-репорт [SER-XX](url): <message>"
+                    # Extract the message after the last ": "
+                    colon_pos = body.find("): ")
+                    if colon_pos != -1:
+                        confirmed_messages.add(body[colon_pos + 3:].strip())
 
             for comment in comments:
                 comment_id = comment.get("id", "")
@@ -480,8 +499,22 @@ class Orchestrator:
                     continue
 
                 bug_message = match.group(1).strip()
+
+                # Skip if a confirmation comment for this message already exists
+                if bug_message in confirmed_messages:
+                    log.info(
+                        "bug_report_already_confirmed",
+                        issue_identifier=issue.identifier,
+                        bug_message=bug_message,
+                    )
+                    self._state.processed_bug_reports.add(comment_id)
+                    continue
+
                 await self._create_bug_report_issue(issue, bug_message)
                 self._state.processed_bug_reports.add(comment_id)
+                # Add to confirmed set so subsequent /bug-report comments
+                # with the same message in this issue are also skipped.
+                confirmed_messages.add(bug_message)
 
     async def _create_bug_report_issue(
         self, source_issue: Issue, bug_message: str
