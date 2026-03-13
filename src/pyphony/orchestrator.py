@@ -398,7 +398,13 @@ class Orchestrator:
                 f"{prompt}"
             )
             try:
-                await self._tracker.comment_on_issue(issue.id, comment_body)
+                comment_id = await self._tracker.comment_on_issue(
+                    issue.id, comment_body,
+                    parent_comment_id=entry.thread_root_comment_id,
+                )
+                # If this is the first comment, it becomes the thread root
+                if comment_id and not entry.thread_root_comment_id:
+                    entry.thread_root_comment_id = comment_id
                 log.info(
                     "interactive_comment_posted",
                     issue_identifier=issue.identifier,
@@ -1053,6 +1059,7 @@ class Orchestrator:
                             issue_id,
                             "⚠️ Conflict resolution completed but PR still cannot be merged. "
                             "Moving to In Review for another attempt.",
+                            parent_comment_id=entry.thread_root_comment_id,
                         )
                     except Exception:
                         pass
@@ -1130,7 +1137,10 @@ class Orchestrator:
                         "Move it to Todo to trigger automatic conflict resolution."
                     )
                     try:
-                        await self._tracker.comment_on_issue(issue_id, conflict_comment)
+                        await self._tracker.comment_on_issue(
+                            issue_id, conflict_comment,
+                            parent_comment_id=entry.thread_root_comment_id,
+                        )
                         log.info(
                             "resolve_conflict_comment_posted",
                             issue_identifier=entry.issue.identifier,
@@ -1159,6 +1169,7 @@ class Orchestrator:
                             try:
                                 await self._tracker.comment_on_issue(
                                     issue_id, merge_comment,
+                                    parent_comment_id=entry.thread_root_comment_id,
                                 )
                             except Exception as exc:
                                 log.warning(
@@ -1518,7 +1529,10 @@ class Orchestrator:
         identifier = entry.issue.identifier if entry else issue_id
         comment_body = f"⚠️ {reason}"
         try:
-            await self._tracker.comment_on_issue(issue_id, comment_body)
+            await self._tracker.comment_on_issue(
+                issue_id, comment_body,
+                parent_comment_id=entry.thread_root_comment_id if entry else None,
+            )
             log.info(
                 "kill_comment_posted",
                 issue_identifier=identifier,
