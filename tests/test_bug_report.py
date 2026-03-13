@@ -111,7 +111,7 @@ class TestProcessBugReportCommands:
             "url": "https://linear.app/team/issue/SER-99",
         })
         tracker.replace_issue_labels = AsyncMock(return_value=True)
-        tracker.comment_on_issue = AsyncMock(return_value=True)
+        tracker.comment_on_issue = AsyncMock(return_value="comment-mock-id")
 
         await orch._process_bug_report_commands([issue])
 
@@ -258,7 +258,7 @@ class TestProcessBugReportCommands:
             "url": "https://linear.app/team/issue/SER-100",
         })
         tracker.replace_issue_labels = AsyncMock(return_value=True)
-        tracker.comment_on_issue = AsyncMock(return_value=True)
+        tracker.comment_on_issue = AsyncMock(return_value="comment-mock-id")
 
         await orch._process_bug_report_commands([issue])
 

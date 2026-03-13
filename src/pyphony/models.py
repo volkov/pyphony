@@ -128,6 +128,7 @@ class RunAttempt(BaseModel):
     result: str | None = None
     plan_text: str | None = None
     transcript_path: str | None = None
+    session_id: str | None = None
 
 
 class LiveSession(BaseModel):
@@ -163,8 +164,20 @@ class RunningEntry(BaseModel):
     attempt: RunAttempt
     session: LiveSession = Field(default_factory=LiveSession)
     worker_task: Any = None
+    thread_root_comment_id: str | None = None
 
     model_config = {"arbitrary_types_allowed": True}
+
+
+class ThreadSession(BaseModel):
+    """Tracks a completed agent session for thread-based resume."""
+
+    issue_id: str
+    issue_identifier: str
+    session_id: str
+    workspace_path: str
+    thread_root_comment_id: str
+    processed_reply_ids: set[str] = Field(default_factory=set)
 
 
 class AgentTotals(BaseModel):
@@ -184,5 +197,6 @@ class OrchestratorRuntimeState(BaseModel):
     agent_totals: AgentTotals = Field(default_factory=AgentTotals)
     agent_rate_limits: dict[str, Any] = Field(default_factory=dict)
     processed_bug_reports: set[str] = Field(default_factory=set)
+    thread_sessions: dict[str, ThreadSession] = Field(default_factory=dict)
 
     model_config = {"arbitrary_types_allowed": True}

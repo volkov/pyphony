@@ -92,8 +92,8 @@ query WorkflowStates($teamId: ID!) {
 """
 
 COMMENT_CREATE_MUTATION = """
-mutation CommentCreate($issueId: String!, $body: String!) {
-  commentCreate(input: { issueId: $issueId, body: $body }) {
+mutation CommentCreate($issueId: String!, $body: String!, $parentId: String) {
+  commentCreate(input: { issueId: $issueId, body: $body, parentId: $parentId }) {
     success
     comment { id body }
   }
@@ -227,6 +227,19 @@ query IssueComments($issueId: String!) {
         createdAt
         user {
           name
+        }
+        parent {
+          id
+        }
+        children {
+          nodes {
+            id
+            body
+            createdAt
+            user {
+              name
+            }
+          }
         }
       }
     }

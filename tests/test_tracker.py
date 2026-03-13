@@ -490,11 +490,11 @@ class TestCommentOnIssue:
         finally:
             await client.close()
 
-        assert result is True
+        assert result == "comment-1"
 
     @respx.mock
     @pytest.mark.asyncio
-    async def test_failed_comment_returns_false(self):
+    async def test_failed_comment_returns_none(self):
         respx.post(ENDPOINT).mock(
             return_value=httpx.Response(
                 200,
@@ -515,7 +515,7 @@ class TestCommentOnIssue:
         finally:
             await client.close()
 
-        assert result is False
+        assert result is None
 
 
 class TestErrorHandling:
@@ -630,6 +630,8 @@ class TestFetchIssueComments:
         assert len(comments) == 3
         assert comments[0]["user"] == "Alice"
         assert comments[0]["body"] == "Oldest"
+        assert comments[0]["parent_id"] is None
+        assert comments[0]["children"] == []
         assert comments[1]["user"] == "Bob"
         assert comments[1]["body"] == "Middle"
         assert comments[2]["user"] == "Charlie"

@@ -266,7 +266,7 @@ class TestPollTick:
 
         dispatched = []
 
-        async def mock_run(issue, attempt):
+        async def mock_run(issue, attempt, **kwargs):
             dispatched.append(issue.identifier)
 
         config = _make_config(tmp_path)
@@ -329,7 +329,7 @@ class TestInProgressTransition:
             ),
         ]
 
-        async def mock_run(issue, attempt):
+        async def mock_run(issue, attempt, **kwargs):
             pass
 
         config = _make_config(tmp_path)
@@ -357,7 +357,7 @@ class TestInProgressTransition:
             ),
         ]
 
-        async def mock_run(issue, attempt):
+        async def mock_run(issue, attempt, **kwargs):
             pass
 
         config = _make_config(tmp_path)
@@ -389,7 +389,7 @@ class TestInProgressTransition:
             httpx.Response(500, text="Internal Server Error"),
         ]
 
-        async def mock_run(issue, attempt):
+        async def mock_run(issue, attempt, **kwargs):
             pass
 
         config = _make_config(tmp_path)
@@ -416,7 +416,7 @@ class TestRetry:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"):
             await orch._on_worker_exit(issue.id, normal=True, error=None)
 
         assert issue.id not in orch.state.retry_attempts
@@ -433,7 +433,7 @@ class TestRetry:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"):
             await orch._on_worker_exit(issue.id, normal=False, error="crash")
 
         assert issue.id not in orch.state.retry_attempts
@@ -448,7 +448,7 @@ class TestRetry:
 
         issue = _make_issue()
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True):
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"):
             # First run (attempt=0) → should schedule retry
             orch.state.running[issue.id] = _running_entry(issue, attempt=0)
             orch.state.claimed.add(issue.id)
@@ -483,7 +483,7 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
             mock_transition.assert_called_once_with(issue.id, "Done")
@@ -499,7 +499,7 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Finished work")
             mock_transition.assert_not_called()
@@ -515,7 +515,7 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=False, error="crash", result="[DONE]")
             mock_transition.assert_not_called()
@@ -531,7 +531,7 @@ class TestIssueTransition:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, side_effect=Exception("API down")):
             # Should not raise
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -553,9 +553,9 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my summary")
-            mock_comment.assert_called_once_with(issue.id, "Here is my summary")
+            mock_comment.assert_called_once_with(issue.id, "Here is my summary", parent_comment_id=None)
 
     @pytest.mark.asyncio
     async def test_fallback_comment_when_no_result(self, tmp_path):
@@ -569,7 +569,7 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result=None)
             mock_comment.assert_called_once()
             body = mock_comment.call_args[0][1]
@@ -587,7 +587,7 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(issue.id, normal=False, error="segfault", result=None)
             mock_comment.assert_called_once()
             body = mock_comment.call_args[0][1]
@@ -606,7 +606,7 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(issue.id, normal=False, error=None, result=None)
             mock_comment.assert_called_once()
             body = mock_comment.call_args[0][1]
@@ -624,9 +624,9 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(issue.id, normal=False, error="crash", result="Partial progress")
-            mock_comment.assert_called_once_with(issue.id, "Partial progress")
+            mock_comment.assert_called_once_with(issue.id, "Partial progress", parent_comment_id=None)
 
     @pytest.mark.asyncio
     async def test_comment_failure_does_not_crash(self, tmp_path):
@@ -661,9 +661,9 @@ class TestCommentOnExit:
 
         call_order = []
 
-        async def mock_comment(issue_id, body):
+        async def mock_comment(issue_id, body, **kwargs):
             call_order.append("comment")
-            return True
+            return "comment-mock-id"
 
         async def mock_transition(issue_id, state):
             call_order.append("transition")
@@ -687,12 +687,12 @@ class TestCommentOnExit:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._on_worker_exit(
                 issue.id, normal=True, error=None,
                 result="Here is my summary",
             )
-            mock_comment.assert_called_once_with(issue.id, "Here is my summary")
+            mock_comment.assert_called_once_with(issue.id, "Here is my summary", parent_comment_id=None)
 
 
 class TestBuildTranscriptUrl:
@@ -757,7 +757,7 @@ class TestTranscriptCommentDuringRun:
         transcript_path = "/home/user/.claude/projects/-Users-user-my-project/abc-123.jsonl"
 
         # Fake agent function that calls on_transcript callback
-        async def fake_agent_fn(issue, attempt, on_transcript=None):
+        async def fake_agent_fn(issue, attempt, on_transcript=None, **kwargs):
             if on_transcript:
                 await on_transcript(transcript_path, "/home/user/my-project")
             return RunAttempt(
@@ -773,7 +773,7 @@ class TestTranscriptCommentDuringRun:
         orch.state.running[issue.id] = entry
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment:
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment:
             await orch._run_worker(issue, entry)
 
             # First call: transcript link comment (posted during agent run)
@@ -798,7 +798,7 @@ class TestTranscriptCommentDuringRun:
         issue = _make_issue()
         callback_called = False
 
-        async def fake_agent_fn(issue, attempt, on_transcript=None):
+        async def fake_agent_fn(issue, attempt, on_transcript=None, **kwargs):
             nonlocal callback_called
             if on_transcript:
                 await on_transcript("/some/path/proj/sess.jsonl", "/some/workspace")
@@ -816,7 +816,7 @@ class TestTranscriptCommentDuringRun:
         orch.state.claimed.add(issue.id)
 
         call_count = 0
-        async def comment_side_effect(issue_id, body):
+        async def comment_side_effect(issue_id, body, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count == 1:
@@ -1178,7 +1178,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/99"]) as mock_pr, \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True) as mock_merge:
@@ -1201,7 +1201,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="All done [DONE]")
@@ -1222,7 +1222,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1243,7 +1243,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1263,7 +1263,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -1292,7 +1292,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, side_effect=Exception("API error")):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1314,7 +1314,7 @@ class TestAutomergeOnDone:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
 
@@ -1339,7 +1339,7 @@ class TestAutomergeOnDone:
             "https://github.com/org/repo/pull/2",
         ]
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=pr_urls), \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock, return_value=True) as mock_merge:
@@ -1369,7 +1369,7 @@ class TestTranscriptPrAttachment:
 
         transcript_prs = ["https://github.com/org/repo/pull/42"]
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
              patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, return_value=True) as mock_attach, \
@@ -1397,7 +1397,7 @@ class TestTranscriptPrAttachment:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
              patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, return_value=True) as mock_attach, \
@@ -1422,7 +1422,7 @@ class TestTranscriptPrAttachment:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
              patch.object(tracker, "attach_pr_to_issue", new_callable=AsyncMock, side_effect=Exception("API error")), \
@@ -1449,7 +1449,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
@@ -1476,7 +1476,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1497,7 +1497,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan [DONE]")
@@ -1518,7 +1518,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, side_effect=Exception("API error")), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan done [DONE]")
@@ -1538,7 +1538,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock) as mock_pr:
@@ -1561,7 +1561,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1582,7 +1582,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my plan")
@@ -1611,7 +1611,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Plan [DONE]")
@@ -1634,7 +1634,7 @@ class TestPlanRequired:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1659,7 +1659,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch("pyphony.orchestrator.try_automerge_pr", new_callable=AsyncMock) as mock_merge:
@@ -1686,7 +1686,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1707,7 +1707,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Here is my research")
@@ -1735,7 +1735,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="Research [DONE]")
@@ -1756,7 +1756,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock) as mock_pr:
@@ -1781,7 +1781,7 @@ class TestResearchLabel:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -1807,7 +1807,7 @@ class TestResearchLabel:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition:
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -1841,7 +1841,7 @@ class TestPlanTextPosted:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -1870,7 +1870,7 @@ class TestPlanTextPosted:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -1899,7 +1899,7 @@ class TestPlanTextPosted:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -1929,7 +1929,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/42"]), \
@@ -1957,7 +1957,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True) as mock_comment, \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id") as mock_comment, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[pr_url]), \
@@ -1983,7 +1983,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2007,7 +2007,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2030,7 +2030,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2059,7 +2059,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2081,7 +2081,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2117,7 +2117,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True) as mock_transition, \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]), \
@@ -2141,7 +2141,7 @@ class TestResolveConflict:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=["https://github.com/org/repo/pull/1"]), \
@@ -2196,7 +2196,7 @@ class TestGracefulDrain:
         orch.state.claimed.add(issue2.id)
 
         # Issue 1 completes with [DONE] → triggers drain
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(issue1.id, normal=True, error=None, result="[DONE]")
@@ -2225,7 +2225,7 @@ class TestGracefulDrain:
         orch.state.claimed.add(issue2.id)
 
         # Issue 1 completes with [DONE] → enters drain
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(issue1.id, normal=True, error=None, result="[DONE]")
@@ -2264,7 +2264,7 @@ class TestGracefulDrain:
         orch.state.running[trigger.id] = _running_entry(trigger)
         orch.state.claimed.add(trigger.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(trigger.id, normal=True, error=None, result="[DONE]")
@@ -2286,7 +2286,7 @@ class TestGracefulDrain:
         orch.state.running[issue.id] = _running_entry(issue)
         orch.state.claimed.add(issue.id)
 
-        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+        with patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "fetch_issue_pr_urls", new_callable=AsyncMock, return_value=[]):
             await orch._on_worker_exit(issue.id, normal=True, error=None, result="[DONE]")
@@ -2418,7 +2418,7 @@ class TestMergeCommentPosted:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -2451,7 +2451,7 @@ class TestMergeCommentPosted:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -2497,7 +2497,7 @@ class TestInteractiveMode:
 
         posted_bodies = []
 
-        async def capture_comment(issue_id, body):
+        async def capture_comment(issue_id, body, **kwargs):
             posted_bodies.append(body)
             return True
 
@@ -2545,7 +2545,7 @@ class TestInteractiveMode:
         with patch.object(ws_mgr, "create_or_reuse", new_callable=AsyncMock, return_value=workspace), \
              patch.object(ws_mgr, "run_before_run", new_callable=AsyncMock), \
              patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]), \
-             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True) as mock_labels, \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._dispatch(issue)
@@ -2570,7 +2570,7 @@ class TestInteractiveMode:
         with patch.object(ws_mgr, "create_or_reuse", new_callable=AsyncMock, return_value=workspace), \
              patch.object(ws_mgr, "run_before_run", new_callable=AsyncMock), \
              patch.object(tracker, "fetch_issue_comments", new_callable=AsyncMock, return_value=[]), \
-             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value=True), \
+             patch.object(tracker, "comment_on_issue", new_callable=AsyncMock, return_value="comment-mock-id"), \
              patch.object(tracker, "replace_issue_labels", new_callable=AsyncMock, return_value=True), \
              patch.object(tracker, "transition_issue", new_callable=AsyncMock, return_value=True):
             await orch._dispatch(issue)

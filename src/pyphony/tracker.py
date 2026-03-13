@@ -229,7 +229,11 @@ class LinearClient:
         return data.get("attachmentCreate", {}).get("success", False)
 
     async def fetch_issue_comments(self, issue_id: str) -> list[dict]:
-        """Fetch comments on an issue. Returns list of dicts with body, createdAt, user."""
+        """Fetch comments on an issue. Returns list of dicts with body, createdAt, user.
+
+        Each comment dict also includes ``parent_id`` (the parent comment ID
+        if this is a reply) and ``children`` (a list of child comment dicts).
+        """
         data = await self._execute(
             ISSUE_COMMENTS_QUERY,
             {"issueId": issue_id},
@@ -240,11 +244,23 @@ class LinearClient:
 
         comments: list[dict] = []
         for node in (issue_node.get("comments") or {}).get("nodes", []):
+            children: list[dict] = []
+            for child_node in (node.get("children") or {}).get("nodes", []):
+                children.append({
+                    "id": child_node.get("id", ""),
+                    "body": child_node.get("body", ""),
+                    "created_at": child_node.get("createdAt", ""),
+                    "user": (child_node.get("user") or {}).get("name", ""),
+                })
+            children.sort(key=lambda c: c["created_at"])
+
             comments.append({
                 "id": node.get("id", ""),
                 "body": node.get("body", ""),
                 "created_at": node.get("createdAt", ""),
                 "user": (node.get("user") or {}).get("name", ""),
+                "parent_id": (node.get("parent") or {}).get("id"),
+                "children": children,
             })
         comments.sort(key=lambda c: c["created_at"])
         return comments
@@ -324,13 +340,26 @@ class LinearClient:
         )
         return data.get("issueUpdate", {}).get("success", False)
 
-    async def comment_on_issue(self, issue_id: str, body: str) -> bool:
-        """Post a comment on an issue. Returns True on success."""
-        data = await self._execute(
-            COMMENT_CREATE_MUTATION,
-            {"issueId": issue_id, "body": body},
-        )
-        return data.get("commentCreate", {}).get("success", False)
+    async def comment_on_issue(
+        self,
+        issue_id: str,
+        body: str,
+        parent_comment_id: str | None = None,
+    ) -> str | None:
+        """Post a comment on an issue.
+
+        Returns the created comment ID on success, or ``None`` on failure.
+        When *parent_comment_id* is provided, the comment is created as a
+        reply (thread) under that parent comment.
+        """
+        variables: dict = {"issueId": issue_id, "body": body}
+        if parent_comment_id:
+            variables["parentId"] = parent_comment_id
+        data = await self._execute(COMMENT_CREATE_MUTATION, variables)
+        result = data.get("commentCreate", {})
+        if not result.get("success"):
+            return None
+        return result.get("comment", {}).get("id")
 
     async def get_issue(self, identifier: str) -> dict[str, str | None]:
         """Fetch an issue by identifier (e.g. SER-27). Returns dict with issue fields."""
