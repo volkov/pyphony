@@ -61,6 +61,12 @@ src/pyphony/
   server.py          # Optional HTTP server (Starlette)
 ```
 
+## Python Environment
+
+When running Python commands inside a workspace, **always use `uv run`** (e.g. `uv run python`, `uv run pytest`). Never use bare `python` or `pip` — the workspace may not have its own virtualenv, and bare `python` may resolve to the orchestrator's interpreter with wrong import paths.
+
+If you need to install dependencies before running tests, run `uv sync` first.
+
 ## Subagent Instructions
 
 Before starting work, read `TODO.md` for the current implementation status.

@@ -322,6 +322,23 @@ class AgentRunner:
                 # 6. Run query
                 # Remove CLAUDECODE to allow launching from within a Claude Code session
                 os.environ.pop("CLAUDECODE", None)
+                # Remove Python virtual-env variables so the spawned agent
+                # doesn't inherit our venv.  Without this, `python` inside the
+                # workspace resolves to the orchestrator's interpreter and
+                # editable-install paths point back to the source repo instead
+                # of the workspace copy.  See SER-93.
+                _VENV_ENV_VARS = (
+                    "VIRTUAL_ENV",
+                    "UV_INTERNAL__PARENT_INTERPRETER",
+                    "CONDA_DEFAULT_ENV",
+                    "CONDA_PREFIX",
+                    "PYTHONPATH",
+                )
+                _saved_env: dict[str, str] = {}
+                for _var in _VENV_ENV_VARS:
+                    _val = os.environ.pop(_var, None)
+                    if _val is not None:
+                        _saved_env[_var] = _val
                 transcript_notified = False
                 async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
                     async for message in query(
@@ -396,6 +413,9 @@ class AgentRunner:
                         )
             finally:
                 stderr_file.close()
+                # Restore virtual-env variables removed before query() (SER-93)
+                for _var, _val in _saved_env.items():
+                    os.environ[_var] = _val
 
         except TimeoutError:
             run_attempt.status = "failed"
