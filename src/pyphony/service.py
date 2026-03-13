@@ -246,10 +246,15 @@ async def _run_service(args: argparse.Namespace) -> None:
     log.info("starting_service", workflow_files=[str(p) for p in workflow_paths])
 
     # Build contexts for each workflow
+    pyphony_slug = getattr(args, "pyphony_slug", None)
     contexts: list[_WorkflowContext] = []
     for workflow_path in workflow_paths:
         wf = load_workflow(workflow_path)
         config = service_config_from_workflow(wf.config, workflow_path=workflow_path)
+
+        # Override pyphony_slug from CLI if provided
+        if pyphony_slug:
+            config.tracker.pyphony_slug = pyphony_slug
 
         errors = validate_dispatch_config(config)
         if errors:

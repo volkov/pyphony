@@ -39,6 +39,7 @@ class TrackerConfig(BaseModel):
     endpoint: str = "https://api.linear.app/graphql"
     api_key: str | None = None
     project_slug: str | None = None
+    pyphony_slug: str | None = None
     active_states: list[str] = Field(default_factory=lambda: ["Todo", "In Progress"])
     terminal_states: list[str] = Field(
         default_factory=lambda: ["Closed", "Cancelled", "Canceled", "Duplicate", "Done"]

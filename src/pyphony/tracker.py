@@ -49,6 +49,7 @@ class LinearClient:
         self._endpoint = config.tracker.endpoint
         self._api_key = config.tracker.api_key
         self._project_slug = config.tracker.project_slug
+        self._pyphony_slug = config.tracker.pyphony_slug
         self._active_states = config.tracker.active_states
         self._terminal_states = config.tracker.terminal_states
         self._client = httpx.AsyncClient(timeout=30.0)
@@ -446,20 +447,24 @@ class LinearClient:
         title: str,
         description: str | None = None,
         state: str | None = None,
+        project_slug: str | None = None,
     ) -> dict[str, str]:
         """Create an issue. Returns dict with id, identifier, title, url.
 
         *state* defaults to ``"Backlog"`` when not given.
+        *project_slug* overrides the default slug for this call.  Falls back to
+        ``pyphony_slug`` (CLI override) → ``project_slug`` (WORKFLOW.md config).
         """
         # Step 1: resolve project ID and team ID from project slug
+        slug = project_slug or self._pyphony_slug or self._project_slug
         proj_data = await self._execute(
             PROJECT_TEAMS_QUERY,
-            {"projectSlug": self._project_slug},
+            {"projectSlug": slug},
         )
         projects = proj_data.get("projects", {}).get("nodes", [])
         if not projects:
             raise LinearUnknownPayload(
-                f"Project with slug '{self._project_slug}' not found"
+                f"Project with slug '{slug}' not found"
             )
         project = projects[0]
         project_id = project["id"]
@@ -467,7 +472,7 @@ class LinearClient:
         teams = project.get("teams", {}).get("nodes", [])
         if not teams:
             raise LinearUnknownPayload(
-                f"No teams found for project '{self._project_slug}'"
+                f"No teams found for project '{slug}'"
             )
         team_id = teams[0]["id"]
 

@@ -111,3 +111,30 @@ class TestParseArgs:
         assert args.state is None
         assert args.workflow_files == ["custom.md"]
         assert args.workflow_file == "custom.md"
+
+    def test_pyphony_slug_default_is_none(self):
+        args = parse_args([])
+        assert args.pyphony_slug is None
+
+    def test_pyphony_slug_flag(self):
+        args = parse_args(["--pyphony-slug", "abc123"])
+        assert args.pyphony_slug == "abc123"
+
+    def test_pyphony_slug_with_run_subcommand(self):
+        args = parse_args(["run", "--pyphony-slug", "my-slug", "wf.md"])
+        assert args.command == "run"
+        assert args.pyphony_slug == "my-slug"
+        assert args.workflow_files == ["wf.md"]
+
+    def test_pyphony_slug_with_work_subcommand(self):
+        args = parse_args(["work", "SER-11", "--pyphony-slug", "proj-slug"])
+        assert args.command == "work"
+        assert args.issue_identifier == "SER-11"
+        assert args.pyphony_slug == "proj-slug"
+
+    def test_pyphony_slug_with_create_issue(self):
+        args = parse_args([
+            "create-issue", "--title", "Test", "--pyphony-slug", "slug123",
+        ])
+        assert args.command == "create-issue"
+        assert args.pyphony_slug == "slug123"
