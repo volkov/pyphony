@@ -68,6 +68,13 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "work", help="Start an interactive Claude session for a Linear issue"
     )
     work_parser.add_argument("issue_identifier", help="Issue identifier (e.g. SER-11)")
+    work_parser.add_argument(
+        "--main",
+        action="store_true",
+        default=False,
+        help="Work directly in the main repo (~/context) instead of a worktree. "
+        "Requires clean working copy on the main branch.",
+    )
     _add_common_args(work_parser)
 
     # Backward compat: if first arg is not a known subcommand, insert "run"

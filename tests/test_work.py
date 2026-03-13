@@ -41,6 +41,16 @@ class TestParseArgsWork:
         assert args.issue_identifier == "SER-5"
         assert args.log_level == "DEBUG"
 
+    def test_work_with_main_flag(self):
+        args = parse_args(["work", "SER-11", "--main"])
+        assert args.command == "work"
+        assert args.issue_identifier == "SER-11"
+        assert args.main is True
+
+    def test_work_without_main_flag(self):
+        args = parse_args(["work", "SER-11"])
+        assert args.main is False
+
 
 # ---------------------------------------------------------------------------
 # Transcript helpers

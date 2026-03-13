@@ -129,7 +129,11 @@ async def _work(args: argparse.Namespace) -> None:
 
         # ── 3. Prepare workspace ────────────────────────────────────────
         workspace_mgr = WorkspaceManager(config)
-        workspace = await workspace_mgr.create_or_reuse(issue.identifier)
+        if getattr(args, "main", False):
+            repo_path = Path("~/context").expanduser()
+            workspace = await workspace_mgr.use_main_repo(repo_path)
+        else:
+            workspace = await workspace_mgr.create_or_reuse(issue.identifier)
         print(f"📁 Workspace: {workspace.path}")
 
         # Run before_run hook
