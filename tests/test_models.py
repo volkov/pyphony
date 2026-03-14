@@ -6,7 +6,7 @@ from pydantic import ValidationError
 from pyphony.models import (
     AgentTotals,
     BlockerRef,
-    CodexConfig,
+    ClaudeConfig,
     Issue,
     LiveSession,
     OrchestratorRuntimeState,
@@ -98,10 +98,10 @@ class TestServiceConfig:
         assert cfg.agent.max_concurrent_agents == 10
         assert cfg.agent.max_turns == 100
         assert cfg.agent.max_retry_backoff_ms == 300000
-        assert cfg.codex.command == "claude"
-        assert cfg.codex.permission_mode == "bypassPermissions"
-        assert cfg.codex.turn_timeout_ms == 3600000
-        assert cfg.codex.stall_timeout_ms == 300000
+        assert cfg.claude.command == "claude"
+        assert cfg.claude.permission_mode == "bypassPermissions"
+        assert cfg.claude.turn_timeout_ms == 3600000
+        assert cfg.claude.stall_timeout_ms == 300000
 
 
 class TestWorkspace:

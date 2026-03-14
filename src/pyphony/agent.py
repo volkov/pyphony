@@ -255,7 +255,7 @@ class AgentRunner:
                 )
 
             # 5. Build SDK options (restrict tools for plan-only issues)
-            codex = self._config.codex
+            claude = self._config.claude
             issue_labels_norm = [
                 normalize_label(label) for label in issue.labels
             ]
@@ -279,21 +279,21 @@ class AgentRunner:
                 # mode but keep all tools available (plan mode itself restricts
                 # write operations via Claude Code's built-in guardrails).
                 if read_only_mode:
-                    effective_allowed_tools = codex.allowed_tools
+                    effective_allowed_tools = claude.allowed_tools
                     effective_permission_mode = "plan"
                 else:
-                    effective_allowed_tools = codex.allowed_tools
-                    effective_permission_mode = codex.permission_mode
+                    effective_allowed_tools = claude.allowed_tools
+                    effective_permission_mode = claude.permission_mode
 
                 options = ClaudeAgentOptions(
                     cwd=workspace.path,
                     permission_mode=effective_permission_mode,
                     allowed_tools=effective_allowed_tools,
-                    disallowed_tools=codex.disallowed_tools if codex.disallowed_tools else None,
-                    model=codex.model,
-                    max_turns=codex.max_turns or self._config.agent.max_turns,
-                    system_prompt=codex.system_prompt,
-                    cli_path=codex.command if codex.command != "claude" else None,
+                    disallowed_tools=claude.disallowed_tools if claude.disallowed_tools else None,
+                    model=claude.model,
+                    max_turns=claude.max_turns or self._config.agent.max_turns,
+                    system_prompt=claude.system_prompt,
+                    cli_path=claude.command if claude.command != "claude" else None,
                     stderr=lambda line: stderr_file.write(line + "\n"),
                     resume=resume_session_id,
                 )
@@ -302,12 +302,12 @@ class AgentRunner:
                     "agent_options",
                     issue_identifier=issue.identifier,
                     cwd=workspace.path,
-                    permission_mode=codex.permission_mode,
-                    allowed_tools=codex.allowed_tools,
-                    disallowed_tools=codex.disallowed_tools,
-                    model=codex.model,
+                    permission_mode=claude.permission_mode,
+                    allowed_tools=claude.allowed_tools,
+                    disallowed_tools=claude.disallowed_tools,
+                    model=claude.model,
                     max_turns=options.max_turns,
-                    system_prompt_len=len(codex.system_prompt) if codex.system_prompt else 0,
+                    system_prompt_len=len(claude.system_prompt) if claude.system_prompt else 0,
                     cli_path=options.cli_path,
                     prompt_len=len(prompt),
                     resume=resume_session_id,
@@ -334,7 +334,7 @@ class AgentRunner:
                     if _val is not None:
                         _saved_env[_var] = _val
                 transcript_notified = False
-                async with asyncio.timeout(codex.turn_timeout_ms / 1000.0):
+                async with asyncio.timeout(claude.turn_timeout_ms / 1000.0):
                     async for message in query(
                         prompt=prompt,
                         options=options,
@@ -416,7 +416,7 @@ class AgentRunner:
             run_attempt.error = "turn_timeout"
         except CLINotFoundError:
             run_attempt.status = "failed"
-            run_attempt.error = "codex_not_found"
+            run_attempt.error = "cli_not_found"
         except ProcessError:
             run_attempt.status = "failed"
             run_attempt.error = "port_exit"

@@ -10,7 +10,7 @@ workspace:
   root: ~/workspaces
 agent:
   max_concurrent_agents: 5
-codex:
+claude:
   command: claude
 ---
 You are working on {{ issue.identifier }}: {{ issue.title }}

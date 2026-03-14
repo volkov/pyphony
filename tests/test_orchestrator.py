@@ -10,7 +10,7 @@ from pyphony.models import (
     AgentConfig,
     AutomergeConfig,
     BlockerRef,
-    CodexConfig,
+    ClaudeConfig,
     Issue,
     RunAttempt,
     RunningEntry,
@@ -36,7 +36,7 @@ def _make_config(tmp_path, **overrides) -> ServiceConfig:
             terminal_states=["Done", "Cancelled"],
         ),
         workspace=WorkspaceConfig(root=str(tmp_path)),
-        codex=CodexConfig(command="claude"),
+        claude=ClaudeConfig(command="claude"),
         agent=AgentConfig(max_concurrent_agents=3),
     )
     defaults.update(overrides)
@@ -932,7 +932,7 @@ class TestStallDetection:
     async def test_stall_detected(self, tmp_path):
         config = _make_config(
             tmp_path,
-            codex=CodexConfig(command="claude", stall_timeout_ms=1),
+            claude=ClaudeConfig(command="claude", stall_timeout_ms=1),
         )
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)
@@ -967,7 +967,7 @@ class TestStallDetection:
     async def test_stall_disabled_when_zero(self, tmp_path):
         config = _make_config(
             tmp_path,
-            codex=CodexConfig(command="claude", stall_timeout_ms=0),
+            claude=ClaudeConfig(command="claude", stall_timeout_ms=0),
         )
         tracker = LinearClient(config)
         ws_mgr = WorkspaceManager(config)

@@ -18,7 +18,7 @@ polling:
   interval_ms: 15000
 agent:
   max_concurrent_agents: 5
-codex:
+claude:
   command: claude
 ---
 You are working on {{ issue.identifier }}: {{ issue.title }}
@@ -34,7 +34,7 @@ polling:
   interval_ms: 20000
 agent:
   max_concurrent_agents: 3
-codex:
+claude:
   command: claude
 ---
 Updated prompt for {{ issue.identifier }}
