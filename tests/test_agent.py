@@ -374,8 +374,8 @@ class TestAgentRunner:
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")
-    async def test_research_uses_read_only_tools(self, mock_query, service_config, issue):
-        """Research issues should be restricted to read-only tools."""
+    async def test_research_uses_configured_permission_mode(self, mock_query, service_config, issue):
+        """Research issues use the configured permission mode (not plan)."""
         issue.labels = ["research"]
         captured_kwargs = {}
 
@@ -388,11 +388,7 @@ class TestAgentRunner:
         await runner.run(issue)
 
         options = captured_kwargs["options"]
-        assert options.permission_mode == "plan"
-        # Should not have Write, Edit, or Bash in allowed_tools
-        allowed = options.allowed_tools or []
-        assert "Write" not in allowed
-        assert "Edit" not in allowed
+        assert options.permission_mode == service_config.claude.permission_mode
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")

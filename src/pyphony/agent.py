@@ -261,7 +261,6 @@ class AgentRunner:
             ]
             plan_required = "plan required" in issue_labels_norm
             research = "research" in issue_labels_norm
-            read_only_mode = plan_required or research
 
             # 5a. Snapshot plan files so we can detect new ones after the run
             plans_before: set[str] = set()
@@ -275,15 +274,8 @@ class AgentRunner:
             stderr_file = open(stderr_path, "w")
 
             try:
-                # For "plan required" and "research" issues, use plan permission
-                # mode but keep all tools available (plan mode itself restricts
-                # write operations via Claude Code's built-in guardrails).
-                if read_only_mode:
-                    effective_allowed_tools = claude.allowed_tools
-                    effective_permission_mode = "plan"
-                else:
-                    effective_allowed_tools = claude.allowed_tools
-                    effective_permission_mode = claude.permission_mode
+                effective_allowed_tools = claude.allowed_tools
+                effective_permission_mode = claude.permission_mode
 
                 options = ClaudeAgentOptions(
                     cwd=workspace.path,
