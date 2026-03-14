@@ -8,7 +8,7 @@ import pytest
 
 from pyphony.models import (
     AgentConfig,
-    CodexConfig,
+    ClaudeConfig,
     Issue,
     ServiceConfig,
     TrackerConfig,
@@ -29,7 +29,7 @@ def _make_config(tmp_path, **overrides) -> ServiceConfig:
             terminal_states=["Done", "Cancelled"],
         ),
         workspace=WorkspaceConfig(root=str(tmp_path)),
-        codex=CodexConfig(command="claude"),
+        claude=ClaudeConfig(command="claude"),
         agent=AgentConfig(max_concurrent_agents=3),
     )
     defaults.update(overrides)

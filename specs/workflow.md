@@ -53,7 +53,7 @@ Top-level keys:
 - `workspace`
 - `hooks`
 - `agent`
-- `codex`
+- `claude`
 
 Unknown keys should be ignored for forward compatibility.
 
@@ -143,27 +143,27 @@ Fields:
   - State keys are normalized (`trim` + `lowercase`) for lookup.
   - Invalid entries (non-positive or non-numeric) are ignored.
 
-#### 1.3.6 `codex` (object)
+#### 1.3.6 `claude` (object)
 
 Fields:
 
-For Codex-owned config values such as `approval_policy`, `thread_sandbox`, and
-`turn_sandbox_policy`, supported values are defined by the targeted Codex app-server version.
-Implementors should treat them as pass-through Codex config values rather than relying on a
-hand-maintained enum in this spec. To inspect the installed Codex schema, run
-`codex app-server generate-json-schema --out <dir>` and inspect the relevant definitions referenced
+For Claude-owned config values such as `approval_policy`, `thread_sandbox`, and
+`turn_sandbox_policy`, supported values are defined by the targeted Claude app-server version.
+Implementors should treat them as pass-through Claude config values rather than relying on a
+hand-maintained enum in this spec. To inspect the installed Claude schema, run
+`claude generate-json-schema --out <dir>` and inspect the relevant definitions referenced
 by `v2/ThreadStartParams.json` and `v2/TurnStartParams.json`. Implementations may validate these
 fields locally if they want stricter startup checks.
 
 - `command` (string shell command)
-  - Default: `codex app-server`
+  - Default: `claude`
   - The runtime launches this command via `bash -lc` in the workspace directory.
   - The launched process must speak a compatible app-server protocol over stdio.
-- `approval_policy` (Codex `AskForApproval` value)
+- `approval_policy` (Claude `AskForApproval` value)
   - Default: implementation-defined.
-- `thread_sandbox` (Codex `SandboxMode` value)
+- `thread_sandbox` (Claude `SandboxMode` value)
   - Default: implementation-defined.
-- `turn_sandbox_policy` (Codex `SandboxPolicy` value)
+- `turn_sandbox_policy` (Claude `SandboxPolicy` value)
   - Default: implementation-defined.
 - `turn_timeout_ms` (integer)
   - Default: `3600000` (1 hour)
@@ -239,7 +239,7 @@ Dynamic reload is required:
 - The software should watch `WORKFLOW.md` for changes.
 - On change, it should re-read and re-apply workflow config and prompt template without restart.
 - The software should attempt to adjust live behavior to the new config (for example polling
-  cadence, concurrency limits, active/terminal states, codex settings, workspace paths/hooks, and
+  cadence, concurrency limits, active/terminal states, claude settings, workspace paths/hooks, and
   prompt content for future runs).
 - Reloaded config applies to future dispatch, retry scheduling, reconciliation decisions, hook
   execution, and agent launches.
@@ -275,7 +275,7 @@ Validation checks:
 - `tracker.kind` is present and supported.
 - `tracker.api_key` is present after `$` resolution.
 - `tracker.project_slug` is present when required by the selected tracker kind.
-- `codex.command` is present and non-empty.
+- `claude.command` is present and non-empty.
 
 ### 2.4 Config Fields Summary (Cheat Sheet)
 
@@ -298,13 +298,13 @@ This section is intentionally redundant so a coding agent can implement the conf
 - `agent.max_turns`: integer, default `20`
 - `agent.max_retry_backoff_ms`: integer, default `300000` (5m)
 - `agent.max_concurrent_agents_by_state`: map of positive integers, default `{}`
-- `codex.command`: shell command string, default `codex app-server`
-- `codex.approval_policy`: Codex `AskForApproval` value, default implementation-defined
-- `codex.thread_sandbox`: Codex `SandboxMode` value, default implementation-defined
-- `codex.turn_sandbox_policy`: Codex `SandboxPolicy` value, default implementation-defined
-- `codex.turn_timeout_ms`: integer, default `3600000`
-- `codex.read_timeout_ms`: integer, default `5000`
-- `codex.stall_timeout_ms`: integer, default `300000`
+- `claude.command`: shell command string, default `claude`
+- `claude.approval_policy`: Claude `AskForApproval` value, default implementation-defined
+- `claude.thread_sandbox`: Claude `SandboxMode` value, default implementation-defined
+- `claude.turn_sandbox_policy`: Claude `SandboxPolicy` value, default implementation-defined
+- `claude.turn_timeout_ms`: integer, default `3600000`
+- `claude.read_timeout_ms`: integer, default `5000`
+- `claude.stall_timeout_ms`: integer, default `300000`
 - `server.port` (extension): integer, optional; enables the optional HTTP server, `0` may be used
   for ephemeral local bind, and CLI `--port` overrides it
 

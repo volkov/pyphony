@@ -10,7 +10,7 @@ workspace:
   repo: ~/context
 agent:
   max_concurrent_agents: 3
-codex:
+claude:
   command: claude
   stall_timeout_ms: 1800000
 ---

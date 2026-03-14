@@ -1406,7 +1406,7 @@ class Orchestrator:
         if not self._state.running:
             return
 
-        stall_timeout_ms = self._config.codex.stall_timeout_ms
+        stall_timeout_ms = self._config.claude.stall_timeout_ms
 
         if stall_timeout_ms > 0:
             now = datetime.now(timezone.utc)

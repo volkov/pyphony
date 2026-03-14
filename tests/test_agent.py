@@ -21,7 +21,7 @@ from claude_agent_sdk import (
 
 from pyphony.models import (
     AgentConfig,
-    CodexConfig,
+    ClaudeConfig,
     HooksConfig,
     Issue,
     RunAttempt,
@@ -65,7 +65,7 @@ def service_config(tmp_path):
         workspace=WorkspaceConfig(root=str(root)),
         hooks=HooksConfig(),
         agent=AgentConfig(max_turns=3),
-        codex=CodexConfig(
+        claude=ClaudeConfig(
             command="claude",
             turn_timeout_ms=10000,
         ),
@@ -130,7 +130,7 @@ class TestAgentRunner:
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")
     async def test_timeout(self, mock_query, service_config, issue):
-        service_config.codex.turn_timeout_ms = 100
+        service_config.claude.turn_timeout_ms = 100
 
         async def fake_query(**kwargs):
             await asyncio.sleep(10)
@@ -155,7 +155,7 @@ class TestAgentRunner:
         result = await runner.run(issue)
 
         assert result.status == "failed"
-        assert result.error == "codex_not_found"
+        assert result.error == "cli_not_found"
 
     @pytest.mark.asyncio
     @patch("pyphony.agent.query")

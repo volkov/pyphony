@@ -71,7 +71,7 @@ class AgentConfig(BaseModel):
     max_concurrent_agents_by_state: dict[str, int] = Field(default_factory=dict)
 
 
-class CodexConfig(BaseModel):
+class ClaudeConfig(BaseModel):
     command: str = "claude"
     permission_mode: str = "bypassPermissions"
     allowed_tools: list[str] = Field(default_factory=list)
@@ -98,7 +98,7 @@ class ServiceConfig(BaseModel):
     workspace: WorkspaceConfig = Field(default_factory=WorkspaceConfig)
     hooks: HooksConfig = Field(default_factory=HooksConfig)
     agent: AgentConfig = Field(default_factory=AgentConfig)
-    codex: CodexConfig = Field(default_factory=CodexConfig)
+    claude: ClaudeConfig = Field(default_factory=ClaudeConfig)
     automerge: AutomergeConfig = Field(default_factory=AutomergeConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     supervisor_restart: bool = False

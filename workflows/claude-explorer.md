@@ -11,7 +11,7 @@ workspace:
   root: ~/symphony_workspaces
 agent:
   max_concurrent_agents: 5
-codex:
+claude:
   command: claude
   stall_timeout_ms: 1800000
 ---

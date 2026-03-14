@@ -44,7 +44,7 @@ hooks:
 agent:
   max_concurrent_agents: 5
   max_retry_backoff_ms: 300000
-codex:
+claude:
   command: claude
   turn_timeout_ms: 3600000
 ---

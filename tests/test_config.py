@@ -18,10 +18,10 @@ class TestServiceConfigFromWorkflow:
         assert cfg.agent.max_concurrent_agents == 10
         assert cfg.agent.max_turns == 200
         assert cfg.agent.max_retry_backoff_ms == 300000
-        assert cfg.codex.command == "claude"
-        assert cfg.codex.turn_timeout_ms == 3600000
-        assert cfg.codex.permission_mode == "bypassPermissions"
-        assert cfg.codex.stall_timeout_ms == 300000
+        assert cfg.claude.command == "claude"
+        assert cfg.claude.turn_timeout_ms == 3600000
+        assert cfg.claude.permission_mode == "bypassPermissions"
+        assert cfg.claude.stall_timeout_ms == 300000
 
     def test_default_workspace_root(self):
         cfg = service_config_from_workflow({})
@@ -159,10 +159,10 @@ class TestDotenvSupport:
 
 class TestValidateDispatchConfig:
     def _valid_config(self, **overrides):
-        from pyphony.models import ServiceConfig, TrackerConfig, CodexConfig
+        from pyphony.models import ServiceConfig, TrackerConfig, ClaudeConfig
         tracker = TrackerConfig(kind="linear", api_key="key", project_slug="slug")
-        codex = CodexConfig(command="claude")
-        cfg = ServiceConfig(tracker=tracker, codex=codex)
+        claude_cfg = ClaudeConfig(command="claude")
+        cfg = ServiceConfig(tracker=tracker, claude=claude_cfg)
         return cfg
 
     def test_valid_config(self):
@@ -195,6 +195,6 @@ class TestValidateDispatchConfig:
 
     def test_missing_command(self):
         cfg = self._valid_config()
-        cfg.codex.command = ""
+        cfg.claude.command = ""
         errors = validate_dispatch_config(cfg)
-        assert any("codex.command" in e for e in errors)
+        assert any("claude.command" in e for e in errors)

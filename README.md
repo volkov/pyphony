@@ -25,7 +25,7 @@ hooks:
   after_create: git clone git@github.com:org/repo.git .
 agent:
   max_concurrent_agents: 5
-codex:
+claude:
   command: claude
 ---
 Ты работаешь над {{ issue.identifier }}: {{ issue.title }}

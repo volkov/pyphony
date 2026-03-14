@@ -23,15 +23,15 @@ Compatibility profile:
 
 Subprocess launch parameters:
 
-- Command: `codex.command`
-- Invocation: `bash -lc <codex.command>`
+- Command: `claude.command`
+- Invocation: `bash -lc <claude.command>`
 - Working directory: workspace path
 - Stdout/stderr: separate streams
 - Framing: line-delimited protocol messages on stdout (JSON-RPC-like JSON per line)
 
 Notes:
 
-- The default command is `codex app-server`.
+- The default command is `claude`.
 - Approval policy, cwd, and prompt are expressed in the protocol messages in Section 1.2.
 
 Recommended additional process settings:
@@ -40,7 +40,7 @@ Recommended additional process settings:
 
 ### 1.2 Session Startup Handshake
 
-Reference: https://developers.openai.com/codex/app-server/
+Reference: https://developers.openai.com/codex/app-server/ (legacy reference)
 
 The client must send these protocol messages in order:
 
@@ -58,7 +58,7 @@ semantics):
    - Params include:
      - `clientInfo` object (for example `{name, version}`)
      - `capabilities` object (may be empty)
-   - If the targeted Codex app-server requires capability negotiation for dynamic tools, include the
+   - If the targeted Claude app-server requires capability negotiation for dynamic tools, include the
      necessary capability flag(s) here.
    - Wait for response (`read_timeout_ms`)
 2. `initialized` notification
@@ -68,7 +68,7 @@ semantics):
      - `sandbox` = implementation-defined session sandbox value
      - `cwd` = absolute workspace path
      - If optional client-side tools are implemented, include their advertised tool specs using the
-       protocol mechanism supported by the targeted Codex app-server version.
+       protocol mechanism supported by the targeted Claude app-server version.
 4. `turn/start` request
    - Params include:
      - `threadId`
@@ -122,7 +122,7 @@ include:
 
 - `event` (enum/string)
 - `timestamp` (UTC timestamp)
-- `codex_app_server_pid` (if available)
+- `claude_agent_pid` (if available)
 - optional `usage` map (token counts)
 - payload fields as needed
 
@@ -172,7 +172,7 @@ Optional client-side tool extension:
 - An implementation may expose a limited set of client-side tools to the app-server session.
 - Current optional standardized tool: `linear_graphql`.
 - If implemented, supported tools should be advertised to the app-server session during startup
-  using the protocol mechanism supported by the targeted Codex app-server version.
+  using the protocol mechanism supported by the targeted Claude app-server version.
 - Unsupported tool names should still return a failure result and continue the session.
 
 `linear_graphql` extension contract:
@@ -226,13 +226,13 @@ Hard failure on user input requirement:
 
 Timeouts:
 
-- `codex.read_timeout_ms`: request/response timeout during startup and sync requests
-- `codex.turn_timeout_ms`: total turn stream timeout
-- `codex.stall_timeout_ms`: enforced by orchestrator based on event inactivity
+- `claude.read_timeout_ms`: request/response timeout during startup and sync requests
+- `claude.turn_timeout_ms`: total turn stream timeout
+- `claude.stall_timeout_ms`: enforced by orchestrator based on event inactivity
 
 Error mapping (recommended normalized categories):
 
-- `codex_not_found`
+- `cli_not_found`
 - `invalid_workspace_cwd`
 - `response_timeout`
 - `turn_timeout`
