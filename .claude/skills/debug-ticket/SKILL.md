@@ -11,33 +11,13 @@ Analyze what happened with ticket $ARGUMENTS in the pyphony service.
 
 ### 0. Load ticket with comments
 
-First, fetch the ticket details and its comments from Linear to understand the full context:
+Fetch the ticket details and its comments from Linear:
 
-1. Run `./pyphony get-issue {TICKET_ID}` to get basic issue info (title, description, state, labels)
-2. Fetch comments on the issue programmatically:
-```python
-uv run python -c "
-import asyncio
-from pyphony.workflow import load_workflow
-from pyphony.config import service_config_from_workflow
-from pyphony.tracker import LinearClient
-
-async def main():
-    wf = load_workflow('workflows/pyphony.md')  # adjust workflow if needed
-    cfg = service_config_from_workflow(wf.config, 'workflows/pyphony.md')
-    client = LinearClient(cfg)
-    comments = await client.fetch_issue_comments('{ISSUE_UUID}')
-    for c in comments:
-        print(f'--- {c[\"created_at\"]} by {c[\"user\"]} ---')
-        print(c['body'][:1000])
-        print()
-    await client.close()
-
-asyncio.run(main())
-"
+```bash
+./pyphony get-issue {TICKET_ID}
 ```
 
-Include the ticket info and comments in the report — they often contain user complaints or context about what went wrong.
+This returns issue info (title, description, state, labels) **and** all comments with their threads. Include the ticket info and comments in the report — they often contain user complaints or context about what went wrong.
 
 ### 1. Find log entries
 
