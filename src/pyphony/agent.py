@@ -275,17 +275,11 @@ class AgentRunner:
             stderr_file = open(stderr_path, "w")
 
             try:
-                # For "plan required" and "research" issues, restrict to read-only tools
+                # For "plan required" and "research" issues, use plan permission
+                # mode but keep all tools available (plan mode itself restricts
+                # write operations via Claude Code's built-in guardrails).
                 if read_only_mode:
-                    plan_allowed_tools = [
-                        t for t in (codex.allowed_tools or [])
-                        if t in ("Read", "Glob", "Grep", "Agent", "WebSearch", "WebFetch")
-                    ]
-                    # Ensure at least the core read tools are available
-                    for tool in ("Read", "Glob", "Grep"):
-                        if tool not in plan_allowed_tools:
-                            plan_allowed_tools.append(tool)
-                    effective_allowed_tools = plan_allowed_tools
+                    effective_allowed_tools = codex.allowed_tools
                     effective_permission_mode = "plan"
                 else:
                     effective_allowed_tools = codex.allowed_tools
