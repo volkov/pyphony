@@ -1,3 +1,8 @@
+---
+name: get-task
+description: Fetch and display an issue from Linear by its identifier (e.g. SER-27). Use when asked to show, read, or get a task/ticket from Linear.
+---
+
 # Get Linear Task
 
 Read an existing task (issue) from the Linear project tracker by its identifier.

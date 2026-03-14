@@ -1,3 +1,8 @@
+---
+name: write-spec
+description: Create or update project specifications (spec.md and specs/*.md). Use when asked to write, update, or review specifications and technical documentation with Mermaid diagrams.
+---
+
 # Написание и обновление спецификаций
 
 Обнови или создай спецификацию для: $ARGUMENTS

@@ -1,3 +1,8 @@
+---
+name: update-task
+description: Update an existing Linear issue — change title, description, or state (e.g. move to Done, In Progress). Use when asked to update, modify, or change a task in Linear.
+---
+
 # Update Linear Task
 
 Update an existing task (issue) in the Linear project tracker.

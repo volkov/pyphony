@@ -1,3 +1,8 @@
+---
+name: debug-ticket
+description: Debug a pyphony ticket — analyze logs, transcripts, stderr, and workspace state. Use when asked to debug, investigate, or understand why a ticket failed or produced unexpected results.
+---
+
 # Debug Ticket
 
 Analyze what happened with ticket $ARGUMENTS in the pyphony service.
