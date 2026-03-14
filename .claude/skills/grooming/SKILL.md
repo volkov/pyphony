@@ -1,3 +1,8 @@
+---
+name: grooming
+description: Interactive backlog grooming — review Linear tickets, propose decomposition, update descriptions/states/labels. Use when asked to groom, review backlog, or go through tasks.
+---
+
 # Grooming — интерактивный разбор бэклога
 
 Интерактивный grooming тикетов из Linear. Агент предлагает действия, пользователь решает.

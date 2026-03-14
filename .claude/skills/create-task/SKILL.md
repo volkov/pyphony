@@ -1,3 +1,8 @@
+---
+name: create-task
+description: Create a new task (issue) in Linear project tracker. Use when asked to create a task, ticket, or issue in Linear — supports Backlog/Todo states and labels like "plan required" or "research".
+---
+
 # Create Linear Task
 
 Create a new task (issue) in the Linear project tracker in Backlog state.
