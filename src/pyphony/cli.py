@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "prompt-view", "work", "open-url", "install-url-scheme"}
+_SUBCOMMANDS = {"run", "list-candidates", "check-issue", "create-issue", "get-issue", "update-issue", "comment-issue", "label-issue", "search-issues", "prompt-view", "work", "open-url", "install-url-scheme"}
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -55,6 +55,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     update_parser.add_argument("--description", default=None, help="New issue description (markdown)")
     update_parser.add_argument("--state", default=None, help="New issue state (e.g. 'In Progress', 'Done')")
     _add_common_args(update_parser)
+
+    # Comment on issue
+    comment_parser = subparsers.add_parser(
+        "comment-issue", help="Add a comment to an existing Linear issue"
+    )
+    comment_parser.add_argument("identifier", help="Issue identifier (e.g. SER-27)")
+    comment_parser.add_argument("--body", required=True, help="Comment body (markdown)")
+    comment_parser.add_argument("--parent-id", default=None, help="Parent comment ID for threaded replies")
+    _add_common_args(comment_parser)
+
+    # Label issue
+    label_parser = subparsers.add_parser(
+        "label-issue", help="Add or remove labels on a Linear issue"
+    )
+    label_parser.add_argument("identifier", help="Issue identifier (e.g. SER-27)")
+    label_parser.add_argument("--add", action="append", default=None, help="Label to add (can be repeated)")
+    label_parser.add_argument("--remove", action="append", default=None, help="Label to remove (can be repeated)")
+    _add_common_args(label_parser)
+
+    # Search issues
+    search_parser = subparsers.add_parser(
+        "search-issues", help="List project issues, optionally filtered by state"
+    )
+    search_parser.add_argument("--state", default=None, help="Comma-separated states to filter (e.g. 'Backlog,Todo')")
+    _add_common_args(search_parser)
 
     # Prompt view
     prompt_view_parser = subparsers.add_parser(
@@ -164,6 +189,15 @@ def main() -> None:
     elif args.command == "update-issue":
         from .issue_commands import update_issue
         update_issue(args)
+    elif args.command == "comment-issue":
+        from .issue_commands import comment_issue
+        comment_issue(args)
+    elif args.command == "label-issue":
+        from .issue_commands import label_issue
+        label_issue(args)
+    elif args.command == "search-issues":
+        from .issue_commands import search_issues
+        search_issues(args)
     elif args.command == "prompt-view":
         from .prompt_view import prompt_view
         prompt_view(args)

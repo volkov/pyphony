@@ -14,10 +14,13 @@ Python implementation of the Symphony Service Specification.
 Skills расположены в `.claude/skills/*/SKILL.md`. Доступны пользователю как `/skill-name` и агентам через `Skill` tool.
 
 - `create-task` — создание задач в Linear
-- `debug-ticket` — дебаг тикетов pyphony (логи, транскрипты, stderr)
 - `get-task` — получение задач из Linear
 - `update-task` — обновление задач в Linear
+- `comment-task` — добавление комментариев к задачам
+- `label-task` — управление лейблами задач (добавление/удаление)
+- `search-tasks` — поиск и список задач по статусу
 - `grooming` — интерактивный груминг бэклога
+- `debug-ticket` — дебаг тикетов pyphony (логи, транскрипты, stderr)
 - `write-spec` — написание и обновление спецификаций
 - `new-workflow` — создание новых воркфлоу для pyphony
 
@@ -42,9 +45,12 @@ uv run python -m pyphony WORKFLOW.md # Start the service
 # CLI subcommands (WORKFLOW.md is used by default):
 ./pyphony list-candidates                                         # Show dispatchable issues
 ./pyphony check-issue SER-52                                      # Why is/isn't issue dispatched
-./pyphony get-issue SER-52                                        # Fetch issue from Linear
+./pyphony get-issue SER-52                                        # Fetch issue with comments
 ./pyphony create-issue --title "..." [--description "..."]        # Create issue
 ./pyphony update-issue SER-52 [--title/--description/--state]     # Update issue
+./pyphony comment-issue SER-52 --body "Comment text"              # Add comment to issue
+./pyphony label-issue SER-52 --add "research" --remove "old"      # Manage labels
+./pyphony search-issues [--state "Backlog,Todo"]                  # List/search issues
 ./pyphony prompt-view SER-52                                      # Show rendered prompt for issue
 ```
 
