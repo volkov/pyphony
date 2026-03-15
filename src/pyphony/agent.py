@@ -285,6 +285,7 @@ class AgentRunner:
                     model=claude.model,
                     max_turns=claude.max_turns or self._config.agent.max_turns,
                     system_prompt=claude.system_prompt,
+                    setting_sources=["user", "project", "local"],
                     cli_path=claude.command if claude.command != "claude" else None,
                     stderr=lambda line: stderr_file.write(line + "\n"),
                     resume=resume_session_id,
