@@ -97,6 +97,8 @@ pyphony-sv WORKFLOW.md                 # Supervisor: рестарт при merge
 - [specs/workspace.md](specs/workspace.md) — workspace management, hooks, safety invariants
 - [specs/agent-protocol.md](specs/agent-protocol.md) — agent runner, JSON-RPC protocol, app-server integration
 - [specs/tracker.md](specs/tracker.md) — Linear GraphQL client, normalization, error handling
+- [specs/interactive.md](specs/interactive.md) — interactive work sessions, automerge, URL scheme
+- [specs/supervisor.md](specs/supervisor.md) — supervisor process, auto-update, restart loop
 - [specs/observability.md](specs/observability.md) — logging, metrics, HTTP server, dashboard API
 - [specs/operations.md](specs/operations.md) — failure model, recovery strategy, security
 - [specs/reference.md](specs/reference.md) — reference algorithms, test matrix, implementation checklist
